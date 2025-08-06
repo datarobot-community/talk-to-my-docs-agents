@@ -1,0 +1,15 @@
+export const ROUTES = {
+    LOGIN: '/login',
+    CHAT: '/chat',
+    CHAT_PAGE: '/chat/:chatId',
+    SETTINGS: '/settings',
+    SETTINGS_GENERAL: '/settings/general',
+    SETTINGS_CHATS: '/settings/chats',
+    SETTINGS_MODELS: '/settings/models',
+    SETTINGS_RAG: '/settings/rag',
+    SETTINGS_SOURCES: '/settings/sources',
+    KNOWLEDGE_BASES: '/knowledge-bases',
+    ADD_KNOWLEDGE_BASE: '/knowledge-bases/new',
+    EDIT_KNOWLEDGE_BASE: '/knowledge-bases/edit',
+    MANAGE_KNOWLEDGE_BASE: '/knowledge-bases/manage',
+};

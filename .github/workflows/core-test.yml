@@ -1,0 +1,62 @@
+---
+name: Test Core
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'core/**.py'
+
+  pull_request:
+    branches: ["main"]
+    paths:
+      - 'core/**.py'
+
+jobs:
+  tests:
+    name: "Core: ${{ matrix.python-version }}"
+    runs-on: "ubuntu-latest"
+    defaults:
+      run:
+        working-directory: core
+
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: "actions/checkout@v4"
+
+      # Ref: https://docs.astral.sh/uv/guides/integration/github/#installation
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          working-directory: core
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Taskfile
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Dependencies
+        working-directory: core
+        run: task install
+
+      - name: Run Static Checks
+        working-directory: core
+        run: task lint-check
+
+# TODO: uncomment when tests are there
+#      - name: Test
+#        working-directory: core
+#        run: task test
+#
+#      - name: Get Cover
+#        uses: orgoro/coverage@v3.2
+#        with:
+#          coverageFile: core/.coverage.xml
+#          token: ${{ secrets.GITHUB_TOKEN }}

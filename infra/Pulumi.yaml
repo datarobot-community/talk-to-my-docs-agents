@@ -1,0 +1,13 @@
+---
+name: "talk-to-my-docs"
+description: |-
+  *Talk to My Docs** delivers a seamless **talk-to-your-docs** experience, transforming documents search and summary. Simply connect the application with your document sources. Then, ask a question, and the agents will work with you to achieve your goals.
+runtime:
+  name: python
+  options:
+    toolchain: uv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: python
+  datarobot:tracecontext: "talk-to-my-docs"

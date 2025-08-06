@@ -1,0 +1,62 @@
+---
+# https://taskfile.dev
+version: '3'
+
+dotenv: [".env"]
+
+includes:
+  agent:
+    taskfile: ./agent_retrieval_agent/Taskfile.yml
+    dir: ./agent_retrieval_agent
+  core:
+    taskfile: ./core/Taskfile.yaml
+    dir: ./core
+  frontend:
+    taskfile: ./frontend_web/Taskfile.yaml
+    dir: ./frontend_web
+  web:
+    taskfile: ./web/Taskfile.yaml
+    dir: ./web
+  infra:
+    taskfile: ./infra/Taskfile.yaml
+    dir: ./infra
+  tests:
+    taskfile: ./tests/Taskfile.yaml
+    dir: ./tests
+
+tasks:
+  install-all:
+    desc: "📦 Install all dependencies for all subprojects that support it"
+    deps:
+      - agent:install
+      - frontend:install
+      - web:install
+      - infra:install
+      - tests:install
+
+  lint-all:
+    desc: "🧹 Lint all subprojects that support linting"
+    deps:
+      - core:lint
+      - agent:lint
+      - frontend:lint
+      - infra:lint
+      - web:lint
+
+  test-all:
+    desc: "🧪 Test all subprojects that support testing"
+    deps:
+      - web:test
+      - frontend:test
+      - agent:test
+  dev-all:
+    desc: "🚀 Run agent, backend (web), and frontend together"
+    deps:
+      - web:dev-agent
+      - frontend:dev
+      - agent:dev
+
+  deploy:
+    desc: "🚀 Deploy the infrastructure"
+    cmds:
+      - task infra:deploy

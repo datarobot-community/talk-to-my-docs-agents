@@ -1,0 +1,23 @@
+[project]
+name = "infra"
+version = "0.0.1"
+description = """
+*Talk to My Docs** delivers a seamless **talk-to-your-docs** experience, transforming documents search and summary. Simply connect the application with your document sources. Then, ask a question, and the agents will work with you to achieve your goals.
+"""
+requires-python = ">=3.11"
+
+dependencies = [
+    "datarobot-pulumi-utils>=0.0.2.post8",
+    "pulumi>=3.175.0",
+    "pulumi-datarobot>=0.10.11",
+    "jinja2>=3.1.5,<4.0",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest-cov>=6.1.1",
+    "pytest>=7.4.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+]

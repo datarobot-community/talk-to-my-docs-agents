@@ -1,0 +1,61 @@
+---
+name: Test web
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'web/**.py'
+
+  pull_request:
+    branches: ["main"]
+    paths:
+      - 'web/**.py'
+
+jobs:
+  tests:
+    name: "FastAPI: web ${{ matrix.python-version }}"
+    runs-on: "ubuntu-latest"
+    defaults:
+      run:
+        working-directory: web
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: "actions/checkout@v4"
+
+      # Ref: https://docs.astral.sh/uv/guides/integration/github/#installation
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          working-directory: web
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Taskfile
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Dependencies
+        working-directory: web
+        run: task install
+
+      - name: Run Static Checks
+        working-directory: web
+        run: task lint-check
+
+      - name: Test
+        working-directory: web
+        run: task test
+
+      - name: Get Cover
+        uses: orgoro/coverage@v3.2
+        with:
+          coverageFile: web/.coverage.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
