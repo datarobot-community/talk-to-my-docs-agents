@@ -24,8 +24,8 @@ export function ChatResponseMessage({
     const tabTriggerClasses =
         'w-fit border-0 rounded-none text-white dark:text-white hover:cursor-pointer data-[state=active]:border-b-2 data-[state=active]:!border-b-violet-900 data-[state=active]:!bg-transparent flex-0';
     return (
-        <div className="my-3 p-3" data-testid="chat-response-message">
-            <div className={cn('w-2xl flex gap-2 items-center', classNames)}>
+        <div className="my-3 py-3" data-testid="chat-response-message">
+            <div className={cn('w-2xl px-3 flex gap-2 items-center', classNames)}>
                 <Avatar>
                     <AvatarImage src={drIcon} alt="LLM" />
                 </Avatar>
@@ -33,7 +33,7 @@ export function ChatResponseMessage({
             </div>
             <div className="w-full">
                 {isPending && !message ? (
-                    <div className="mt-2 bg-gray-900 p-3 w-fit rounded-md">
+                    <div className="mt-2 bg-card p-4 w-fit rounded-md">
                         <DotPulseLoader />
                     </div>
                 ) : (

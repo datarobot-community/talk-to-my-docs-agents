@@ -11,10 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from app.files.contents import (
-    get_or_create_encoded_content,
-    get_or_create_encoded_content_legacy,
-)
+from app.files.contents import get_or_create_encoded_content
 from app.files.models import (
     File,
     FileCreate,
@@ -24,7 +21,6 @@ from app.files.models import (
 
 __all__ = [
     "get_or_create_encoded_content",
-    "get_or_create_encoded_content_legacy",
     "File",
     "FileCreate",
     "FileUpdate",

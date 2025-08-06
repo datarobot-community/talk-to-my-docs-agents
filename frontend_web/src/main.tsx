@@ -23,6 +23,7 @@ import { chatKeys } from '@/api/chat/keys';
 import { getCurrentUser } from '@/api/auth/requests';
 import { getBaseUrl } from '@/lib/utils.ts';
 
+import './index.css';
 import App from './App.tsx';
 import { getLlmCatalog } from '@/api/chat/requests.ts';
 

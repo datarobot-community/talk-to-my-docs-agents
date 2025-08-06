@@ -115,7 +115,7 @@ export const KnowledgeBases = () => {
                     <div
                         test-id="knowledge-base-card"
                         key={base.uuid}
-                        className="border border-gray-700 rounded-lg p-6 hover:shadow-lg transition-shadow bg-gray-800 hover:bg-gray-750 flex flex-col h-full"
+                        className="border border-gray-700 rounded-lg p-6 hover:shadow-lg transition-shadow bg-card hover:bg-gray-750 flex flex-col h-full"
                     >
                         <div className="flex justify-between items-start mb-4">
                             <div className="flex-1">

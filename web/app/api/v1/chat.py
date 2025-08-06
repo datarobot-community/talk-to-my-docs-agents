@@ -34,17 +34,18 @@ from openai.types.chat.chat_completion_user_message_param import (
 from pydantic import ValidationError
 
 from app.api.v1.knowledge_bases import (
-    KnowledgeBaseFileSchema,
     get_knowledge_base_schema,
 )
 from app.auth.ctx import must_get_auth_ctx
-from app.files import get_or_create_encoded_content_legacy
+from app.files.contents import get_or_create_encoded_content
 from app.models.chats import Chat, ChatCreate, ChatRepository
 from app.models.messages import Message, MessageCreate, Role
 from core import getenv
 
 if TYPE_CHECKING:
+    from app.files.models import File, FileRepository
     from app.knowledge_bases import KnowledgeBase, KnowledgeBaseRepository
+    from app.users.user import User, UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,8 @@ def initialize_deployment(deployment_id: str) -> tuple[RESTClientObject, str]:
 
 async def augment_message_with_files(
     message: str,
-    files: list[KnowledgeBaseFileSchema],
+    files: "list[File]",
+    file_repo: "FileRepository",
     knowledge_base: "KnowledgeBase | None" = None,
     knowledge_base_repo: "KnowledgeBaseRepository | None" = None,
 ) -> str:
@@ -91,8 +93,9 @@ async def augment_message_with_files(
         if not file.file_path:
             logger.warning(f"File {file.filename} has no file_path, skipping.")
             continue
-        file_contents = await get_or_create_encoded_content_legacy(
-            file.file_path,
+        file_contents = await get_or_create_encoded_content(
+            file=file,
+            file_repo=file_repo,
             knowledge_base=knowledge_base,
             knowledge_base_repo=knowledge_base_repo,
         )
@@ -141,11 +144,53 @@ async def _get_chat_id(chat_repo: ChatRepository, chat_id: str | None) -> uuidpk
     return uuid_value
 
 
+async def _get_files(
+    current_user: "User",
+    file_ids_str: list[str],
+    file_repo: "FileRepository",
+) -> list["File"]:
+    # Validate and convert file IDs
+    file_ids = []
+    for file_id_str in file_ids_str:
+        try:
+            file_ids.append(uuidpkg.UUID(file_id_str))
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400, detail=f"Invalid file_id format: {file_id_str}"
+            )
+
+    files = await file_repo.get_files(user=current_user, file_ids=file_ids)
+    return files
+
+
+async def _get_knowledge_base(
+    knowledge_base_uuid_str: str | None,
+    knowledge_base_repo: "KnowledgeBaseRepository",
+) -> "KnowledgeBase | None":
+    """Get Knowledge Base by UUID."""
+    if not knowledge_base_uuid_str:
+        return None
+    try:
+        knowledge_base_uuid = uuidpkg.UUID(knowledge_base_uuid_str)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid knowledge_base_id format")
+
+    # Get Knowledge Base files if knowledge base is provided
+    knowledge_base_obj: KnowledgeBase | None = None
+    if knowledge_base_uuid:
+        knowledge_base_obj = await knowledge_base_repo.get_knowledge_base(
+            knowledge_base_uuid=knowledge_base_uuid
+        )
+        if not knowledge_base_obj:
+            raise HTTPException(status_code=400, detail="Knowledge Base not found.")
+    return knowledge_base_obj
+
+
 @chat_router.post("/chat/completions")
 async def chat_completion(
     request: Request, auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx)
 ) -> Any:
-    user_repo = request.app.state.deps.user_repo
+    user_repo: UserRepository = request.app.state.deps.user_repo
     # Get current user's UUID
     current_user = await user_repo.get_user(user_id=int(auth_ctx.user.id))
     if not current_user:
@@ -158,52 +203,35 @@ async def chat_completion(
     chat_id = request_data.get("chat_id")
     knowledge_base_uuid_str = request_data.get("knowledge_base_id")
 
-    # Convert string UUIDs to UUID objects
-    file_ids = []
-    for file_id_str in file_ids_str:
-        try:
-            file_ids.append(uuidpkg.UUID(file_id_str))
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=400, detail=f"Invalid file_id format: {file_id_str}"
-            )
-
-    knowledge_base_uuid = None
-    if knowledge_base_uuid_str:
-        try:
-            knowledge_base_uuid = uuidpkg.UUID(knowledge_base_uuid_str)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=400, detail="Invalid knowledge_base_id format"
-            )
-
-    chat_repo = request.app.state.deps.chat_repo
-    message_repo = request.app.state.deps.message_repo
-    file_repo = request.app.state.deps.file_repo
+    # Get repositories
+    file_repo: FileRepository = request.app.state.deps.file_repo
     knowledge_base_repo: KnowledgeBaseRepository = (
         request.app.state.deps.knowledge_base_repo
     )
 
-    combined_files: list[KnowledgeBaseFileSchema] = []
-    knowledge_base_obj = None
-    if knowledge_base_uuid:
-        knowledge_base_obj = await knowledge_base_repo.get_knowledge_base(
-            knowledge_base_uuid=knowledge_base_uuid
+    # Get combined files from both sources
+    files = await _get_files(
+        current_user=current_user,
+        file_ids_str=file_ids_str,
+        file_repo=file_repo,
+    )
+    knowledge_base = await _get_knowledge_base(
+        knowledge_base_uuid_str=knowledge_base_uuid_str,
+        knowledge_base_repo=knowledge_base_repo,
+    )
+    knowledge_base_files: list[File] = []
+    if knowledge_base and current_user.id:
+        knowledge_base_files = await file_repo.get_kb_files_by_owner(
+            owner_id=current_user.id,
+            knowledge_base_id=knowledge_base.id,
         )
+    # Combine both sets of files
+    combined_files = files + knowledge_base_files
 
-        # Fill in all the files from both ad-hoc files and the optional knowledge base
-        knowledge_base_schema = await get_knowledge_base_schema(
-            knowledge_base_uuid=knowledge_base_uuid,
-            knowledge_base_repo=knowledge_base_repo,
-            current_user=current_user,
-            include_content=False,  # We will fetch content in augment_message_with_files
-            file_repo=file_repo,
-        )
-        combined_files += knowledge_base_schema.files
+    chat_repo = request.app.state.deps.chat_repo
+    message_repo = request.app.state.deps.message_repo
 
-    files = await file_repo.get_files(user=current_user, file_ids=file_ids)
-    combined_files += files
-
+    # Get the correct chat
     chat_uuid = await _get_chat_id(chat_repo, chat_id)
     await message_repo.create_message(
         MessageCreate(
@@ -225,15 +253,17 @@ async def chat_completion(
         timeout=90,
         max_retries=2,
     )
-    # Augment the message with file content
+    # Augment the message with file content if they exist
     augmented_message = message
     if combined_files:
         augmented_message = await augment_message_with_files(
             message,
-            combined_files,
-            knowledge_base=knowledge_base_obj,
+            files=combined_files,
+            file_repo=file_repo,
+            knowledge_base=knowledge_base,
             knowledge_base_repo=knowledge_base_repo,
         )
+
     # Create OpenAI messages
     messages: list[ChatCompletionMessageParam] = [
         ChatCompletionSystemMessageParam(role="system", content=SYSTEM_PROMPT),
@@ -273,48 +303,34 @@ async def chat_agent_completion(
     message = request_data["message"]
     llm_model = request_data.get("model", "ttmdocs-agents")
     knowledge_base_uuid_str = request_data.get("knowledge_base_id")
-    knowledge_base_uuid = None
-    if knowledge_base_uuid_str:
-        try:
-            knowledge_base_uuid = uuidpkg.UUID(knowledge_base_uuid_str)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=400, detail="Invalid knowledge_base_id format"
-            )
-
     file_ids_str = request_data.get("file_ids", [])
-    # Convert string UUIDs to UUID objects
-    file_ids = []
-    for file_id_str in file_ids_str:
-        try:
-            file_ids.append(uuidpkg.UUID(file_id_str))
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=400, detail=f"Invalid file_id format: {file_id_str}"
-            )
 
     chat_repo = request.app.state.deps.chat_repo
     message_repo = request.app.state.deps.message_repo
     file_repo = request.app.state.deps.file_repo
     knowledge_base_repo = request.app.state.deps.knowledge_base_repo
 
+    # Get/Validate files and knowledge base schema
+    files = await _get_files(
+        current_user=current_user, file_ids_str=file_ids_str, file_repo=file_repo
+    )
+    knowledge_base = await _get_knowledge_base(
+        knowledge_base_uuid_str=knowledge_base_uuid_str,
+        knowledge_base_repo=knowledge_base_repo,
+    )
     knowledge_base_schema = None
-    knowledge_base_obj = None
-    if knowledge_base_uuid:
-        knowledge_base_schema = await get_knowledge_base_schema(
-            knowledge_base_uuid=knowledge_base_uuid,
-            knowledge_base_repo=knowledge_base_repo,
-            current_user=current_user,
-            include_content=True,
-            file_repo=file_repo,
-        )
-
-        # Get the actual KnowledgeBase object for token counting
-        knowledge_base_obj = await knowledge_base_repo.get_knowledge_base(
-            knowledge_base_uuid=knowledge_base_uuid
-        )
-
-    files = await file_repo.get_files(user=current_user, file_ids=file_ids)
+    if knowledge_base:
+        try:
+            knowledge_base_schema = await get_knowledge_base_schema(
+                knowledge_base_uuid=knowledge_base.uuid,
+                knowledge_base_repo=knowledge_base_repo,
+                current_user=current_user,
+                include_content=True,
+                file_repo=file_repo,
+            )
+        except (ValueError, TypeError):
+            # This should not happen since get_combined_files already validates
+            pass
 
     chat_id = await _get_chat_id(chat_repo, request_data.get("chat_id"))
     await message_repo.create_message(
@@ -348,7 +364,8 @@ async def chat_agent_completion(
         augmented_message = await augment_message_with_files(
             message,
             files,
-            knowledge_base=knowledge_base_obj,
+            file_repo=file_repo,
+            knowledge_base=knowledge_base,
             knowledge_base_repo=knowledge_base_repo,
         )
     # Create OpenAI formatted for Crew AI
@@ -364,14 +381,7 @@ async def chat_agent_completion(
 
     # Add file content if files are provided
     if files:
-        augmented_message = await augment_message_with_files(
-            message,
-            files,
-            knowledge_base=knowledge_base_obj,
-            knowledge_base_repo=knowledge_base_repo,
-        )
         content["question"] = augmented_message
-
     messages: list[ChatCompletionMessageParam] = [
         ChatCompletionUserMessageParam(role="user", content=json.dumps(content)),
     ]

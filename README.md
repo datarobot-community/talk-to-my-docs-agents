@@ -79,7 +79,7 @@ cd talk-to-my-docs-agent
 Copy the sample environment file and fill in your credentials:
 
 ```sh
-cp .env.sample .env
+cp .env.template .env
 # Edit .env with your API keys and secrets
 ```
 

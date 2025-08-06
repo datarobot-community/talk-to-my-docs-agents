@@ -46,7 +46,7 @@ def calculate_token_count(encoded_content: dict[int, str]) -> int:
 
 async def get_or_create_encoded_content(
     file: "File",
-    file_repo: "FileRepository | None" = None,
+    file_repo: "FileRepository",
     knowledge_base: "KnowledgeBase | None" = None,
     knowledge_base_repo: "KnowledgeBaseRepository | None" = None,
 ) -> dict[int, str] | None:
@@ -124,44 +124,3 @@ async def get_or_create_encoded_content(
     except Exception as e:
         logger.error(f"Failed to encode document {file_path}: {e}")
         return None
-
-
-async def get_or_create_encoded_content_legacy(
-    file_path: str,
-    knowledge_base: "KnowledgeBase | None" = None,
-    knowledge_base_repo: "KnowledgeBaseRepository | None" = None,
-) -> dict[int, str] | None:
-    """
-    Legacy function signature for backward compatibility.
-
-    DEPRECATED: Use get_or_create_encoded_content with File object instead.
-
-    Args:
-        file_path: Path to the original file
-        knowledge_base: Optional KnowledgeBase to update token count
-        knowledge_base_repo: Optional KnowledgeBaseRepository for updating token count
-
-    Returns:
-        Dictionary mapping page numbers to text content, or None if encoding fails
-    """
-    # Create a minimal file-like object for the new function
-    import uuid
-
-    from app.files.models import File
-
-    # Create a temporary file object with just the path
-    temp_file = File(
-        uuid=uuid.uuid4(),
-        filename=pathlib.Path(file_path).name,
-        source="legacy",
-        file_path=file_path,
-        owner_id=0,  # Will not be used for token updates
-    )
-
-    # Call the new function without file repository (no file token update)
-    return await get_or_create_encoded_content(
-        file=temp_file,
-        file_repo=None,
-        knowledge_base=knowledge_base,
-        knowledge_base_repo=knowledge_base_repo,
-    )

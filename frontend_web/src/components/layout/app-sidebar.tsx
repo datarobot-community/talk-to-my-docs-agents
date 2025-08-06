@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import drLogo from '@/assets/DataRobot_white.svg';
 import drIcon from '@/assets/DataRobotLogo_black.svg';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { cn } from '@/lib/utils';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -22,12 +23,12 @@ import {
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button.tsx';
 import { ROUTES } from '@/pages/routes';
+import { Separator } from '@/components/ui/separator';
 
 import { Link } from 'react-router-dom';
 import { useCurrentUser } from '@/api/auth/hooks';
 import { PATHS } from '@/constants/paths';
 import { ChatList } from '@/components/custom/chat-list';
-import { CollapsibleSection } from '../ui/collapsible-section';
 
 // Menu items.
 const items = [
@@ -79,11 +80,20 @@ export function AppSidebar() {
                     </Link>
                 )}
             </SidebarHeader>
-            <SidebarContent>
+            <SidebarContent className="pl-1">
                 <SidebarMenu>
-                    <SidebarGroup>
+                    <SidebarGroup className="gap-2">
                         {items.map(item => (
-                            <SidebarMenuItem key={item.title}>
+                            <SidebarMenuItem
+                                key={item.title}
+                                className={cn(
+                                    'flex gap-2 pr-3 pl-2 py-2 rounded-l-none border-l-2 border-transparent overflow-hidden transition-colors cursor-pointer hover:bg-card',
+                                    {
+                                        'rounded-l-none border-l-2 border-white bg-card':
+                                            location.pathname === item.url,
+                                    }
+                                )}
+                            >
                                 <SidebarMenuButton
                                     asChild
                                     isActive={location.pathname === item.url}
@@ -95,14 +105,16 @@ export function AppSidebar() {
                                 </SidebarMenuButton>
                             </SidebarMenuItem>
                         ))}
+                        <Separator className="my-4 border-t" />
                         {open && (
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild>
-                                    <CollapsibleSection title="All chats" defaultOpen>
+                            <>
+                                <p className="ml-1 text-base font-semibold">Chats</p>
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton asChild>
                                         <ChatList />
-                                    </CollapsibleSection>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </>
                         )}
                     </SidebarGroup>
                 </SidebarMenu>

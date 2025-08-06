@@ -20,9 +20,6 @@ includes:
   infra:
     taskfile: ./infra/Taskfile.yaml
     dir: ./infra
-  tests:
-    taskfile: ./tests/Taskfile.yaml
-    dir: ./tests
 
 tasks:
   install-all:
@@ -32,7 +29,6 @@ tasks:
       - frontend:install
       - web:install
       - infra:install
-      - tests:install
 
   lint-all:
     desc: "🧹 Lint all subprojects that support linting"

@@ -126,6 +126,10 @@ def test_chat_agent_completion_with_invalid_knowledge_base_uuid(
 
 def test_chat_completions_with_invalid_knowledge_base_uuid(
     authenticated_client: TestClient,
+    deps: Deps,
+    mock_dr_client: MagicMock,
+    mock_openai_client: MagicMock,
+    mock_message_repo: MagicMock,
 ) -> None:
     """Test that chat completions endpoint properly validates knowledge_base_id UUID format."""
     # Test with invalid UUID format
@@ -140,22 +144,28 @@ def test_chat_completions_with_invalid_knowledge_base_uuid(
     assert response.status_code == 400
     assert "Invalid knowledge_base_id format" in response.json()["detail"]
 
-    # Test with valid UUID format (should not fail on UUID validation)
-    import uuid
+    # Mock the chat_repo.create_chat method to return a proper Chat object
+    test_chat = Chat(uuid=uuidpkg.uuid4(), name="New Chat")
+    with patch.object(
+        deps.chat_repo, "create_chat", new_callable=AsyncMock
+    ) as mock_create_chat:
+        mock_create_chat.return_value = test_chat
 
-    valid_uuid = str(uuid.uuid4())
-    response = authenticated_client.post(
-        "/api/v1/chat/completions",
-        json={
-            "message": "Hello, test!",
-            "model": "test-model",
-            "knowledge_base_id": valid_uuid,
-        },
-    )
-    # May still fail for other reasons (like knowledge base not found), but not due to UUID format
-    assert response.status_code != 400 or "Invalid knowledge_base_id format" not in str(
-        response.json().get("detail", "")
-    )
+        valid_uuid = str(uuidpkg.uuid4())
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "message": "Hello, test!",
+                "model": "test-model",
+                "knowledge_base_id": valid_uuid,
+            },
+        )
+        # May still fail for other reasons (like knowledge base not found), but not due to UUID format
+        assert (
+            response.status_code != 400
+            or "Invalid knowledge_base_id format"
+            not in str(response.json().get("detail", ""))
+        )
 
 
 def test_get_chats_with_authentication(

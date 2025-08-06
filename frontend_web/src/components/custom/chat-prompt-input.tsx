@@ -160,12 +160,12 @@ export function ChatPromptInput({
                     className={cn(
                         isPendingMessage && 'pointer-events-none',
                         'resize-none rounded-none',
-                        'border-gray-800'
+                        'dark:bg-muted border-gray-700'
                     )}
                     onKeyDown={handleEnterPress}
                     data-testid="chat-prompt-input-textarea"
                 />
-                <div className="w-full p-1 border border-t-0 border-gray-800">
+                <div className="w-full p-1 border border-t-0 border-gray-700">
                     <div className="flex items-center justify-between h-12">
                         <div className="flex gap-1 items-center">
                             <DropdownMenu>
