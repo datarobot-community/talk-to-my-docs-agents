@@ -122,6 +122,18 @@ class MyAgent:
             timeout=self.timeout,
         )
 
+    def get_deployment_model(self) -> str:
+        """Returns the consistent model name to use when routing to deployment.
+        
+        When use_deployment=True, the model name is ignored by DataRobot and the
+        deployment ID is used instead. This method provides a consistent model
+        reference for all agents.
+        
+        Returns:
+            str: The model name to use for deployment routing.
+        """
+        return DEFAULT_MODEL
+
     @property
     def file_list_tool(self) -> FileListTool:
         return FileListTool()
@@ -161,7 +173,7 @@ class MyAgent:
             verbose=self.verbose,
             max_iter=3,
             llm=self.model_factory(
-                model="datarobot/bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
+                model=self.get_deployment_model(),
                 use_deployment=True,
             ),
         )
@@ -197,7 +209,7 @@ class MyAgent:
             max_iter=5,
             verbose=self.verbose,
             llm=self.model_factory(
-                model="datarobot/azure/gpt-4o-mini",
+                model=self.get_deployment_model(),
                 use_deployment=True,
             ),
         )
@@ -237,7 +249,8 @@ class MyAgent:
             max_iter=5,
             verbose=self.verbose,
             llm=self.model_factory(
-                model="datarobot/azure/gpt-4o-2024-11-20",
+                model=self.get_deployment_model(),
+                # model="datarobot/azure/gpt-4o-2024-11-20",
                 use_deployment=True,
             ),
         )
@@ -270,7 +283,7 @@ class MyAgent:
             verbose=self.verbose,
             max_iter=5,
             llm=self.model_factory(
-                model="datarobot/bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0",
+                model=self.get_deployment_model(),
                 use_deployment=True,
             ),
         )
@@ -314,7 +327,7 @@ class MyAgent:
             max_iter=5,
             verbose=self.verbose,
             llm=self.model_factory(
-                model="datarobot/azure/gpt-4o-2024-11-20",
+                model=self.get_deployment_model(),
                 use_deployment=True,
             ),
         )
@@ -367,7 +380,7 @@ class MyAgent:
             allow_delegation=False,
             verbose=self.verbose,
             llm=self.model_factory(
-                model="datarobot/azure/gpt-4o-2024-11-20",
+                model=self.get_deployment_model(),
                 use_deployment=True,
             ),
         )
