@@ -16,6 +16,7 @@ from fastapi import APIRouter
 from .auth import auth_router
 from .chat import chat_router
 from .files import files_router
+from .forecast import forecast_router
 from .knowledge_bases import knowledge_base_router
 
 router = APIRouter(prefix="/v1")
@@ -24,3 +25,4 @@ router.include_router(auth_router)
 router.include_router(knowledge_base_router)
 router.include_router(files_router)
 router.include_router(chat_router)
+router.include_router(forecast_router)

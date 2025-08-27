@@ -89,7 +89,7 @@ export function KnowledgeBaseForm({
                             All app users
                         </Label>
                         <div className="text-sm text-gray-400">
-                            Everyone with access to this app can view and use this knowledge base
+                            Everyone with access to this app can view and use this forecast view
                         </div>
                     </div>
                 </div>
@@ -108,7 +108,7 @@ export function KnowledgeBaseForm({
                             Private
                         </Label>
                         <div className="text-sm text-gray-400">
-                            Only you can view and use this knowledge base
+                            Only you can view and use this forecast view
                         </div>
                     </div>
                 </div>
@@ -133,8 +133,8 @@ export function KnowledgeBaseForm({
                     {isLoading
                         ? 'Saving...'
                         : isEditing
-                          ? 'Update knowledge base'
-                          : 'Create knowledge base'}
+                          ? 'Update forecast view'
+                          : 'Create forecast view'}
                 </Button>
             </div>
         </form>

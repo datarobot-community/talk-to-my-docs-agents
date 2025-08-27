@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from pathlib import Path
-from typing import Any, List, Optional, Type
+from typing import Any, List, Optional, Type, Dict
+import json
+import os
+import requests
+from pydantic import BaseModel, Field
 
 from core.document_loader import document_loader
 from crewai.tools import BaseTool
-from pydantic import BaseModel, Field
 
 sample_documents_path = Path(__file__).parent / "sample_documents"
 
@@ -137,3 +140,156 @@ class KnowledgeBaseContentTool(BaseTool):  # type: ignore[misc]
                 }
                 print(f"DEBUG: Content not found for UUID: {file_uuid}", flush=True)
         return content_subset
+
+
+class ForecastSummaryToolSchema(BaseModel):
+    query: str = Field(..., description="The forecast query or question being asked")
+
+
+class ForecastSummaryTool(BaseTool):  # type: ignore[misc]
+    name: str = "Get Forecast Summary"
+    description: str = (
+        "This tool retrieves a comprehensive forecast summary including top account variances, "
+        "product impacts, and overall metrics. Use this when users ask about forecast overviews, "
+        "top performers, biggest variances, or general forecast health."
+    )
+    args_schema: Type[BaseModel] = ForecastSummaryToolSchema
+
+    def _run(self, **kwargs: Any) -> str:
+        try:
+            response = requests.get(
+                "http://localhost:8080/api/v1/forecast/summary",
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('DATAROBOT_API_TOKEN')}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Format the response for the agent
+            summary = f"""
+FORECAST SUMMARY ({data['period']['current']}):
+Total Current Forecast: ${data['summary_metrics']['total_forecast_current']:,}
+Overall Variance: ${data['summary_metrics']['overall_variance']:,}
+
+TOP ACCOUNTS WITH VARIANCES:
+"""
+            for account in data['top_accounts_with_variances'][:3]:
+                summary += f"- {account['account_name']}: ${account['current_forecast']:,} ({account['variance_percentage']:+.1f}%)\n"
+            
+            summary += "\nTOP PRODUCTS CAUSING VARIANCES:\n"
+            for product in data['top_products_causing_variances'][:3]:
+                summary += f"- {product['product_name']}: ${product['total_variance']:,} variance ({product['trend']})\n"
+            
+            return summary
+            
+        except Exception as e:
+            return f"Error retrieving forecast summary: {str(e)}"
+
+
+class AccountVarianceToolSchema(BaseModel):
+    account_name: str = Field(..., description="Name of the account to analyze")
+    period: str = Field(default="current", description="Time period for analysis (current, previous)")
+
+
+class AccountVarianceTool(BaseTool):  # type: ignore[misc]
+    name: str = "Get Account Variance Details"
+    description: str = (
+        "This tool retrieves detailed variance analysis for a specific account, including "
+        "product-level breakdowns, historical trends, and reasons for variances. "
+        "Use this when users ask about specific accounts or companies."
+    )
+    args_schema: Type[BaseModel] = AccountVarianceToolSchema
+
+    def _run(self, **kwargs: Any) -> str:
+        account_name = kwargs.get("account_name", "")
+        period = kwargs.get("period", "current")
+        
+        try:
+            response = requests.get(
+                f"http://localhost:8080/api/v1/forecast/account/{account_name}/variance",
+                params={"period": period},
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('DATAROBOT_API_TOKEN')}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            analysis = f"""
+VARIANCE ANALYSIS FOR {data['account_name']} ({period}):
+
+PRODUCT BREAKDOWN:
+"""
+            for product in data['variance_breakdown']:
+                analysis += f"- {product['product']}: ${product['current_forecast']:,} vs ${product['previous_forecast']:,} (${product['variance']:,} variance)\n"
+                analysis += f"  Reason: {product['reason']}\n"
+            
+            analysis += "\nHISTORICAL TRENDS (Recent 6 months):\n"
+            for trend in data['historical_trends']:
+                actual = f"${trend['actual_value']:,}" if trend['actual_value'] else "TBD"
+                analysis += f"- {trend['month']}: Forecast ${trend['forecast_value']:,}, Actual {actual}\n"
+            
+            return analysis
+            
+        except Exception as e:
+            return f"Error retrieving account variance for {account_name}: {str(e)}"
+
+
+class ProductImpactToolSchema(BaseModel):
+    product_name: str = Field(..., description="Name of the product to analyze")
+
+
+class ProductImpactTool(BaseTool):  # type: ignore[misc]
+    name: str = "Get Product Impact Analysis"
+    description: str = (
+        "This tool analyzes the impact of a specific product across all accounts, including "
+        "total forecast contribution, account-level impacts, market factors, and risk factors. "
+        "Use this when users ask about specific products or product lines."
+    )
+    args_schema: Type[BaseModel] = ProductImpactToolSchema
+
+    def _run(self, **kwargs: Any) -> str:
+        product_name = kwargs.get("product_name", "")
+        
+        try:
+            response = requests.get(
+                f"http://localhost:8080/api/v1/forecast/product/{product_name}/impact",
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('DATAROBOT_API_TOKEN')}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            analysis = f"""
+PRODUCT IMPACT ANALYSIS FOR {data['product_name']}:
+Total Forecast Impact: ${data['total_forecast_impact']:,}
+
+ACCOUNTS AFFECTED:
+"""
+            for account in data['accounts_affected']:
+                analysis += f"- {account['account_name']}: ${account['forecast_contribution']:,} contribution, "
+                analysis += f"${account['variance_from_plan']:,} variance ({account['confidence_level']} confidence)\n"
+            
+            analysis += f"\nMARKET FACTORS:\n"
+            for factor in data['market_factors']:
+                analysis += f"- {factor}\n"
+            
+            analysis += f"\nRISK FACTORS:\n"
+            for risk in data['risk_factors']:
+                analysis += f"- {risk}\n"
+            
+            return analysis
+            
+        except Exception as e:
+            return f"Error retrieving product impact for {product_name}: {str(e)}"

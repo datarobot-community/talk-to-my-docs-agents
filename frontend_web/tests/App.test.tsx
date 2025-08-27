@@ -27,7 +27,7 @@ describe('Application', () => {
 
         const modelSelectorTrigger = await screen.findByTestId('dropdown-model-selector-trigger');
         expect(modelSelectorTrigger).toBeInTheDocument();
-        expect(modelSelectorTrigger).toHaveTextContent('🧠 Intelligent Agent Crew');
+        expect(modelSelectorTrigger).toHaveTextContent('🤖 EFM Bot');
 
         const chatPromptInput = await screen.findByTestId('chat-prompt-input');
         expect(chatPromptInput).toBeInTheDocument();
@@ -41,11 +41,11 @@ describe('Application', () => {
         } as AppState);
 
         const modelName = await screen.findByTestId('app-model-name');
-        expect(modelName).toHaveTextContent('🧠 Intelligent Agent Crew');
+        expect(modelName).toHaveTextContent('🤖 EFM Bot');
 
         const modelSelectorTrigger = screen.getByTestId('dropdown-model-selector-trigger');
         expect(modelSelectorTrigger).toBeInTheDocument();
-        expect(modelSelectorTrigger).toHaveTextContent('🧠 Intelligent Agent Crew');
+        expect(modelSelectorTrigger).toHaveTextContent('🤖 EFM Bot');
 
         await userEvent.click(modelSelectorTrigger);
 

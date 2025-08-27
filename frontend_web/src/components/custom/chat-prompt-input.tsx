@@ -263,14 +263,14 @@ export function ChatPromptInput({
                                             className="cursor-pointer"
                                         >
                                             <BookOpenText />
-                                            Add knowledge base
+                                            Add forecast view
                                         </DropdownMenuItem>
                                     )}
                                 </DropdownMenuContent>
                             </DropdownMenu>
                             <Info className="h-4 text-gray-400" />
                             <p className="h-4 text-base text-gray-400 leading-none">
-                                Upload a file or select a knowledge base
+                                Upload a file or select a forecast view
                             </p>
                         </div>
                         <Input
@@ -310,10 +310,9 @@ export function ChatPromptInput({
                                 </Button>
                             </div>
                             <div>
-                                <div className=" flex text-sm items-center text-gray-600 gap-2 mb-2">
-                                    <div className="bg-indigo-400 rounded-full px-2 py-1 text-xs text-gray-900 vertical-align-middle">
-                                        Knowledge base
-                                    </div>
+                                <div className=" flex text-sm items-center text-gray-600 gap-2 mb-2">                                <div className="bg-indigo-400 rounded-full px-2 py-1 text-xs text-gray-900 vertical-align-middle">
+                                    Forecast view
+                                </div>
                                     <div className="text-xs text-gray-500">
                                         {selectedKnowledgeBase.files.length} file
                                         {selectedKnowledgeBase.files.length !== 1 ? 's' : ''} •{' '}

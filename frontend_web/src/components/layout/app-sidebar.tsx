@@ -38,7 +38,7 @@ const items = [
         icon: MessagesSquare,
     },
     {
-        title: 'Knowledge Bases',
+        title: 'Forecast Views',
         url: ROUTES.KNOWLEDGE_BASES,
         icon: BookOpenText,
     },

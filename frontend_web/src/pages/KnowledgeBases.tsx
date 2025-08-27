@@ -29,7 +29,7 @@ export const KnowledgeBases = () => {
     const handleDeleteBase = async (baseUuid: string) => {
         if (
             confirm(
-                'Are you sure you want to delete this knowledge base? This action cannot be undone.'
+                'Are you sure you want to delete this forecast view? This action cannot be undone.'
             )
         ) {
             setDeletingBaseId(baseUuid);
@@ -56,7 +56,7 @@ export const KnowledgeBases = () => {
             <div className="flex justify-center items-center max-h-screen p-6">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
-                    <p className="text-gray-500">Loading knowledge bases...</p>
+                    <p className="text-gray-500">Loading forecast views...</p>
                 </div>
             </div>
         );
@@ -66,7 +66,7 @@ export const KnowledgeBases = () => {
         return (
             <div className="flex justify-center items-center max-h-screen p-6">
                 <div className="text-center">
-                    <p className="text-red-500 mb-4">Failed to load knowledge bases</p>
+                    <p className="text-red-500 mb-4">Failed to load forecast views</p>
                     <Button onClick={() => window.location.reload()}>Retry</Button>
                 </div>
             </div>
@@ -79,12 +79,12 @@ export const KnowledgeBases = () => {
                 <div className="p-6 pt-48 max-w-2xl w-full items-center flex-col justify-center flex max-h-screen">
                     <img
                         src={noBasesPreview}
-                        alt="No knowledge bases yet"
+                        alt="No forecast views yet"
                         className="w-48 h-48 mx-auto mb-4"
                     />
-                    <h2 className="text-xl font-semibold mb-4">No knowledge bases yet</h2>
+                    <h2 className="text-xl font-semibold mb-4">No forecast views yet</h2>
                     <p className="text-gray-500">
-                        Create a knowledge base to group documents by topic, team, or use case.
+                        Create a forecast view to group documents by topic, team, or use case.
                     </p>
                     <p className="text-gray-500 mb-6">
                         Once uploaded, you can search, summarize, and chat with them using AI.
@@ -95,7 +95,7 @@ export const KnowledgeBases = () => {
                         onClick={() => navigate(ROUTES.ADD_KNOWLEDGE_BASE)}
                         className="h-9 flex cursor-pointer"
                     >
-                        Create knowledge base
+                        Create forecast view
                     </Button>
                 </div>
             </div>
@@ -106,9 +106,9 @@ export const KnowledgeBases = () => {
         <div className="p-6 max-w-6xl mx-auto">
             <div className="flex justify-between items-center mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Knowledge Bases</h1>
+                    <h1 className="text-2xl font-bold text-white">Forecast Views</h1>
                     <p className="text-gray-400 mt-1">
-                        Manage your document collections and upload files to knowledge bases
+                        Manage your document collections and upload files to forecast views
                     </p>
                 </div>
             </div>

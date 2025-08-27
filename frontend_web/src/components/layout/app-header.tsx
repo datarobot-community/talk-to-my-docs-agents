@@ -88,7 +88,7 @@ export function AppHeader() {
                         className="flex items-center gap-2"
                     >
                         <ChevronLeft className="h-4 w-4" />
-                        Knowledge bases
+                        Forecast Views
                     </Button>
                 )}
             </div>
@@ -99,7 +99,7 @@ export function AppHeader() {
                     className="flex items-center gap-2"
                 >
                     <Plus className="h-4 w-4" />
-                    Create knowledge base
+                    Create forecast view
                 </Button>
             )}
         </header>

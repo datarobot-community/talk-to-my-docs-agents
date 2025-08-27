@@ -22,7 +22,14 @@ from crewai import LLM, Agent, Crew, CrewOutput, Task
 from helpers import CrewAIEventListener, create_inputs_from_completion_params
 from openai.types.chat import CompletionCreateParams
 from ragas.messages import AIMessage
-from tool import DocumentReadTool, FileListTool, KnowledgeBaseContentTool
+from tool import (
+    DocumentReadTool, 
+    FileListTool, 
+    KnowledgeBaseContentTool,
+    ForecastSummaryTool,
+    AccountVarianceTool,
+    ProductImpactTool
+)
 
 DEFAULT_MODEL = "datarobot/azure/gpt-4o-mini"
 
@@ -127,6 +134,21 @@ class MyAgent:
     def knowledge_base_content_tool(self) -> KnowledgeBaseContentTool:
         """Returns the KnowledgeBaseContentTool instance."""
         return KnowledgeBaseContentTool(knowledge_base=self.knowledge_base_files)
+
+    @property
+    def forecast_summary_tool(self) -> ForecastSummaryTool:
+        """Returns the ForecastSummaryTool instance."""
+        return ForecastSummaryTool()
+
+    @property
+    def account_variance_tool(self) -> AccountVarianceTool:
+        """Returns the AccountVarianceTool instance."""
+        return AccountVarianceTool()
+
+    @property
+    def product_impact_tool(self) -> ProductImpactTool:
+        """Returns the ProductImpactTool instance."""
+        return ProductImpactTool()
 
     @property
     def agent_file_searcher(self) -> Agent:
@@ -239,11 +261,11 @@ class MyAgent:
 
     @property
     def knowledge_base_file_searcher(self) -> Agent:
-        """An agent that searches through knowledge base files to find the most relevant ones."""
+        """An agent that searches through forecast data files to find the most relevant ones."""
         return Agent(
-            role="Knowledge Base File Searcher",
-            goal="Given a list of files from a knowledge base with limited content previews, identify the most relevant files that would contain information to answer the question: {question}",
-            backstory="You are an expert at analyzing file metadata, titles, and content previews to determine which files are most likely to contain relevant information. You work with knowledge base systems where full content isn't immediately available.",
+            role="Forecast Data File Searcher",
+            goal="Given a list of forecast files from a forecast view with limited content previews, identify the most relevant files that would contain information to answer the question: {question}",
+            backstory="You are an expert at analyzing forecast file metadata, titles, and content previews to determine which files are most likely to contain relevant forecast information. You work with forecast view systems where full content isn't immediately available.",
             allow_delegation=False,
             verbose=self.verbose,
             max_iter=5,
@@ -275,17 +297,18 @@ class MyAgent:
 
     @property
     def knowledge_base_content_answerer(self) -> Agent:
-        """An agent that answers questions using the full content of knowledge base files."""
+        """An agent that answers questions using forecast data and financial analysis."""
         return Agent(
-            role="Knowledge Base Content Answerer",
+            role="Forecast Data Analyst",
             goal=(
-                'Given a list of file UUIDs and an extremely important question: "{question}", '
-                "read the full content of those files to answer the question."
+                'Given forecast data and an extremely important question: "{question}", '
+                "analyze the forecast information to provide insights and explain variances."
             ),
             backstory=(
-                "You are an expert at reading and synthesizing information from multiple documents to provide accurate, well-sourced answers. "
-                "You have access to the complete content of knowledge base files and can extract the most relevant information. "
-                "You always use the exact UUIDs provided by the previous agent - never make up or guess UUIDs."
+                "You are an expert financial analyst specializing in sales forecasting and variance analysis. "
+                "You have deep expertise in analyzing forecast data, identifying trends, and explaining changes. "
+                "You can interpret forecast metrics, calculate period-over-period variances, and provide actionable insights. "
+                "You always use the exact data provided and never make assumptions about missing information."
             ),
             allow_delegation=False,
             max_iter=5,
@@ -300,24 +323,28 @@ class MyAgent:
     def task_knowledge_base_content_answer(self) -> Task:
         return Task(
             description=(
-                "IMPORTANT: The Knowledge Base File Searcher has provided you with relevant file UUIDs in its output. "
-                "You must carefully examine the context from the previous task to extract these UUIDs. \n"
-                "CRITICAL: You MUST use your tool to get the content from those files\n\n"
-                "Your task:\n"
-                "1. Look at the output from the Knowledge Base File Searcher task in your context\n"
-                "2. Find any lines that start with '- ' followed by a UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)\n"
-                "3. Extract ALL UUIDs from those lines - they will look like: 6d9b8079-732e-4b02-99cd-697fe9df9a67\n"
-                "4. Use the knowledge base content tool with the extracted UUIDs as a list\n"
-                "5. Read and understand the content deeply\n"
-                '6. Create a comprehensive answer to the question: "{question}"\n\n'
-                "Example: If you see in the context:\n"
-                "'Selected UUIDs:\\n- 6d9b8079-732e-4b02-99cd-697fe9df9a67\\n- 22b19e27-15b8-4238-98f4-d66571aa0c58'\n"
-                "Then you should call your tool with: ['6d9b8079-732e-4b02-99cd-697fe9df9a67', '22b19e27-15b8-4238-98f4-d66571aa0c58']\n\n"
-                "CRITICAL: Never call the tool with an empty list. Always extract the UUIDs from the context first."
+                'You are a Forecast Data Analyst. Your task is to answer the question: "{question}" using forecast data analysis tools.\n\n'
+                "Available tools and when to use them:\n"
+                "1. **Forecast Summary Tool**: Use this for general forecast questions or when you need an overview\n"
+                "   - Questions about overall forecast performance, total variances, general metrics\n"
+                "   - Examples: 'What is the forecast summary?', 'How is the forecast performing?'\n\n"
+                "2. **Account Variance Tool**: Use this when the question mentions a specific account/company\n"
+                "   - Questions about specific companies, account performance, account-level variances\n"
+                "   - Examples: 'How is NVIDIA performing?', 'What's Tesla's variance?'\n\n"
+                "3. **Product Impact Tool**: Use this when the question mentions a specific product\n"
+                "   - Questions about product performance, product impact across accounts\n"
+                "   - Examples: 'How is GPU H100 Series performing?', 'What's the impact of Model S?'\n\n"
+                "Instructions:\n"
+                "1. Analyze the question to determine which tool(s) to use\n"
+                "2. Use the appropriate tools to gather forecast data\n"
+                "3. Analyze and interpret the data provided by the tools\n"
+                "4. Provide comprehensive insights with specific numbers and trends\n"
+                "5. Always explain variances and their business implications\n\n"
+                "Important: Use the tools to get actual data - never make up forecast numbers!"
             ),
-            expected_output="A comprehensive, well-formatted markdown summary answering the question using the knowledge base content.",
+            expected_output="A comprehensive, well-formatted markdown analysis answering the question using actual forecast data from the tools.",
             agent=self.knowledge_base_content_answerer,
-            tools=[self.knowledge_base_content_tool],
+            tools=[self.forecast_summary_tool, self.account_variance_tool, self.product_impact_tool],
             context=[],
         )
 
@@ -432,13 +459,15 @@ class MyAgent:
             inputs = {"topic": inputs}
 
         # Handle knowledge base content extraction and storage
-        if "knowledge_base" in inputs:
+        if "knowledge_base" in inputs and isinstance(inputs["knowledge_base"], dict):
             # Extract and store encoded_content, remove from working inputs
             self._extract_and_store_knowledge_base_content(inputs["knowledge_base"])
             self.knowledge_base_content_tool.knowledge_base = self.knowledge_base_files
             inputs["topic"] = inputs["knowledge_base"]["description"]
         else:
-            inputs["knowledge_base"] = ""
+            inputs["knowledge_base"] = {}
+            if "topic" not in inputs:
+                inputs["topic"] = "general forecast inquiry"
         # Print commands may need flush=True to ensure they are displayed in real-time.
         print("Running agent with inputs:", inputs, flush=True)
 
@@ -461,4 +490,4 @@ class MyAgent:
         # Tool Call Accuracy).
         # If you are not interested in these metrics, you can also return None instead.
         # This will reduce the size of the response significantly.
-        return crew_output, events
+        return crew_output, events or []

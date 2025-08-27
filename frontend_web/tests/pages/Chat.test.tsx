@@ -11,7 +11,7 @@ describe('Page: Chat', () => {
     it('renders the initial chat input', async () => {
         renderWithProviders(<Chat />);
 
-        const modelText = await screen.findByText('🧠 Intelligent Agent Crew');
+        const modelText = await screen.findByText('🤖 EFM Bot');
         const textArea = await screen.findByTestId('chat-prompt-input-textarea');
         const submitBtn = await screen.findByTestId('chat-prompt-input-submit');
         expect(modelText).toBeInTheDocument();

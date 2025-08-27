@@ -1,7 +1,7 @@
 export const AGENT_MODEL = 'ttmdocs-agents';
 
 export const AGENT_MODEL_LLM = {
-    name: '🧠 Intelligent Agent Crew',
+    name: '🤖 EFM Bot',
     model: AGENT_MODEL,
     llmId: AGENT_MODEL,
     isActive: true,

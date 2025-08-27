@@ -43,7 +43,7 @@ export const KnowledgeBaseFormPage = () => {
                 is_public: existingKnowledgeBase.is_public, // Default to private for existing bases
             });
         } else if (!isEditing && !isManaging) {
-            // Clear form for new knowledge base creation
+            // Clear form for new forecast view creation
             setFormBase(undefined);
         }
     }, [existingKnowledgeBase, isEditing, isManaging]);
@@ -93,7 +93,7 @@ export const KnowledgeBaseFormPage = () => {
             <div className="flex justify-center items-center max-h-screen p-6">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
-                    <p className="text-gray-500">Loading knowledge base...</p>
+                    <p className="text-gray-500">Loading forecast view...</p>
                 </div>
             </div>
         );
@@ -118,7 +118,7 @@ export const KnowledgeBaseFormPage = () => {
                 ) : (
                     <>
                         <h2 className="text-xl font-semibold mb-4">
-                            {isEditing ? 'Edit Knowledge Base' : 'Create a Knowledge Base'}
+                            {isEditing ? 'Edit Forecast View' : 'Create a Forecast View'}
                         </h2>
                         <KnowledgeBaseForm
                             onSave={handleSave}
