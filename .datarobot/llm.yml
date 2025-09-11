@@ -2,7 +2,7 @@ infra_enable_llm:
   env: INFRA_ENABLE_LLM
   type: string
   optional: true
-  help: "Select "
+  help: "Select the type of LLM integration to enable."
   options:
     - name: "External LLM"
       value: "blueprint_with_external_llm.py"
@@ -50,11 +50,11 @@ llm_model_info:
         optional: false
         multiple: true
         options:
-          - "OpenAI"
-          - "Azure"
-          - "VertexAI"
-          - "Anthropic"
-          - "Bedrock"
+          - name: "OpenAI"
+          - name: "Azure"
+          - name: "VertexAI"
+          - name: "Anthropic"
+          - name: "Bedrock"
         help: "The provider of the external LLM model. Options are OpenAI, Azure, VertexAI, and/or Anthropic."
     openai:
         requires:
