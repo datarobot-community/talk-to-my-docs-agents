@@ -38,44 +38,44 @@ llm_model_info:
     requires:
         - name: infra_enable_llm
           value: "blueprint_with_external_llm.py"
-    llm_default_model:
-        env: LLM_DEFAULT_MODEL
+    prompts:
+        - env: LLM_DEFAULT_MODEL
+          type: string
+          default: "gpt-3.5-turbo"
+          optional: true
+          help: "The name of the external LLM model to use."
+        - key: llm_provider
+          type: string
+          default: "OpenAI"
+          optional: false
+          multiple: true
+          options:
+            - name: "OpenAI"
+            - name: "Azure"
+            - name: "VertexAI"
+            - name: "Anthropic"
+            - name: "Bedrock"
+          help: "The provider of the external LLM model. Options are OpenAI, Azure, VertexAI, and/or Anthropic."
+openai:
+    requires:
+      - name: llm_provider
+        value: "OpenAI"
+    prompts:
+      - env: OPENAI_API_KEY
         type: string
-        default: "gpt-3.5-turbo"
-        optional: true
-        help: "The name of the external LLM model to use."
-    llm_provider:
-        type: string
-        default: "OpenAI"
         optional: false
-        multiple: true
-        options:
-          - name: "OpenAI"
-          - name: "Azure"
-          - name: "VertexAI"
-          - name: "Anthropic"
-          - name: "Bedrock"
-        help: "The provider of the external LLM model. Options are OpenAI, Azure, VertexAI, and/or Anthropic."
-    openai:
-        requires:
-          - name: llm_provider
-            value: "OpenAI"
-        prompts:
-          - env: OPENAI_API_KEY
-            type: string
-            optional: false
-            help: "The API key for OpenAI."
-          - env: OPENAI_API_BASE
-            type: string
-            optional: false
-            help: "The API base URL for OpenAI, usually in the format https://<your_custom_endpoint>.openai.azure.com"
-          - env: OPENAI_API_DEPLOYMENT_ID
-            type: string
-            optional: false
-            help: "The deployment ID for the OpenAI model."
-          - env: OPENAI_API_VERSION
-            type: string
-            optional: false
-            help: "The API version for OpenAI."
+        help: "The API key for OpenAI."
+      - env: OPENAI_API_BASE
+        type: string
+        optional: false
+        help: "The API base URL for OpenAI, usually in the format https://<your_custom_endpoint>.openai.azure.com"
+      - env: OPENAI_API_DEPLOYMENT_ID
+        type: string
+        optional: false
+        help: "The deployment ID for the OpenAI model."
+      - env: OPENAI_API_VERSION
+        type: string
+        optional: false
+        help: "The API version for OpenAI."
 
 
