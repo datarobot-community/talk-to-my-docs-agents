@@ -4,12 +4,14 @@ pulumi_config_passphrase:
   default: 123
   optional: true
   help: "The passphrase used to encrypt and decrypt the private key. This value is required if you're not using pulumi cloud."
+
 datarobot_default_use_case:
   env: DATAROBOT_DEFAULT_USE_CASE
   type: string
   default:
   optional: true
   help: "The default use case for this application. If not set, a new use case will be created automatically"
+
 data_source:
   type: string
   default:
@@ -18,6 +20,7 @@ data_source:
   options:
     - name: "Google"
     - name: "Box"
+
 google_data_source:
   requires:
     - name: data_source
@@ -33,6 +36,7 @@ google_data_source:
       default:
       optional: false
       help: "The client secret for the Google data source."
+
 box_data_source:
   requires:
     - name: data_source
@@ -48,12 +52,14 @@ box_data_source:
       default:
       optional: false
       help: "The client secret for the Box data source."
+
 session_secret_key:
   env: SESSION_SECRET_KEY
   type: string
   default: ""
   optional: false
   help: "A secret key used to sign session cookies. This should be a long, random string."
+
 datarobot_default_execution_environment:
   env: DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT
   type: string
