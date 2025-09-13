@@ -1,83 +1,72 @@
-infra_enable_llm:
-  env: INFRA_ENABLE_LLM
-  type: string
-  optional: true
-  help: "Select the type of LLM integration to enable."
-  options:
-    - name: "External LLM"
-      value: "blueprint_with_external_llm.py"
-    - name: "LLM Gateway"
-      value: "blueprint_with_llm_gateway.py"
-    - name: "DataRobot Deployed LLM"
-      value: "deployed_llm.py"
-    - name: "Registered Model with an LLM Blueprint"
-      value: "registered_model.py"
+root:
+  - env: INFRA_ENABLE_LLM
+    type: string
+    optional: true
+    help: "Select the type of LLM integration to enable."
+    options:
+      - name: "LLM Gateway"
+        value: "blueprint_with_llm_gateway.py"
+      - name: "DataRobot Deployed LLM"
+        value: "deployed_llm.py"
+        requires: deployed_llm
+      - name: "Registered Model with an LLM Blueprint"
+        value: "registered_model.py"
+        requires: registered_model
+      - name: "External LLM"
+        value: "blueprint_with_external_llm.py"
+        requires: external_llm
 
 deployed_llm:
-  requires:
-    - name: infra_enable_llm
-      value: "deployed_llm.py"
-  env: TEXTGEN_DEPLOYMENT_ID
-  type: string
-  optional: false
-  help: "The deployment ID of the DataRobot Deployed LLM to use."
+  - env: TEXTGEN_DEPLOYMENT_ID
+    type: string
+    optional: false
+    help: "The deployment ID of the DataRobot Deployed LLM to use."
 
 registered_model:
-  requires:
-    - name: infra_enable_llm
-      value: "registered_model.py"
-  prompts:
-    - env: TEXTGEN_REGISTERED_MODEL_ID
-      type: string
-      optional: false
-      help: "The ID of the registered model with an LLM blueprint to use."
-    - env: DATAROBOT_TIMEOUT_MINUTES
-      type: number
-      default: 30
-      optional: true
-      help: "The timeout in minutes for DataRobot operations. Default is 30 minutes."
+  - env: TEXTGEN_REGISTERED_MODEL_ID
+    type: string
+    optional: false
+    help: "The ID of the registered model with an LLM blueprint to use."
+  - env: DATAROBOT_TIMEOUT_MINUTES
+    type: number
+    default: 30
+    optional: true
+    help: "The timeout in minutes for DataRobot operations. Default is 30 minutes."
 
-llm_model_info:
-  requires:
-    - name: infra_enable_llm
-      value: "blueprint_with_external_llm.py"
-  prompts:
-    - env: LLM_DEFAULT_MODEL
-      type: string
-      default: "gpt-3.5-turbo"
-      optional: true
-      help: "The name of the external LLM model to use."
-    - key: llm_provider
-      type: string
-      default: "OpenAI"
-      optional: false
-      multiple: true
-      options:
-        - name: "OpenAI"
-        - name: "Azure"
-        - name: "VertexAI"
-        - name: "Anthropic"
-        - name: "Bedrock"
-      help: "The provider of the external LLM model. Options are OpenAI, Azure, VertexAI, and/or Anthropic."
+external_llm:
+  - env: LLM_DEFAULT_MODEL
+    type: string
+    default: "gpt-3.5-turbo"
+    optional: true
+    help: "The name of the external LLM model to use."
+  - key: llm_provider
+    type: string
+    default: "OpenAI"
+    optional: false
+    multiple: true
+    options:
+      - name: "OpenAI"
+        requires: openai
+      - name: "Azure"
+      - name: "VertexAI"
+      - name: "Anthropic"
+      - name: "Bedrock"
+    help: "The provider of the external LLM model. Options are OpenAI, Azure, VertexAI, and/or Anthropic."
 
 openai:
-  requires:
-    - name: llm_provider
-      value: "OpenAI"
-  prompts:
-    - env: OPENAI_API_KEY
-      type: string
-      optional: false
-      help: "The API key for OpenAI."
-    - env: OPENAI_API_BASE
-      type: string
-      optional: false
-      help: "The API base URL for OpenAI, usually in the format https://<your_custom_endpoint>.openai.azure.com"
-    - env: OPENAI_API_DEPLOYMENT_ID
-      type: string
-      optional: false
-      help: "The deployment ID for the OpenAI model."
-    - env: OPENAI_API_VERSION
-      type: string
-      optional: false
-      help: "The API version for OpenAI."
+  - env: OPENAI_API_KEY
+    type: string
+    optional: false
+    help: "The API key for OpenAI."
+  - env: OPENAI_API_BASE
+    type: string
+    optional: false
+    help: "The API base URL for OpenAI, usually in the format https://<your_custom_endpoint>.openai.azure.com"
+  - env: OPENAI_API_DEPLOYMENT_ID
+    type: string
+    optional: false
+    help: "The deployment ID for the OpenAI model."
+  - env: OPENAI_API_VERSION
+    type: string
+    optional: false
+    help: "The API version for OpenAI."
