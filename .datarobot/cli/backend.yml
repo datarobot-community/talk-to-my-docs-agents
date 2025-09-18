@@ -1,7 +1,8 @@
+---
 root:
   - env: PULUMI_CONFIG_PASSPHRASE
     type: string
-    default: 123
+    default: "123"
     optional: true
     help: "The passphrase used to encrypt and decrypt the private key. This value is required if you're not using pulumi cloud."
   - env: DATAROBOT_DEFAULT_USE_CASE
