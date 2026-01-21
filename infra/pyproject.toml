@@ -4,7 +4,7 @@ version = "0.0.1"
 description = """
 *Talk to My Docs** delivers a seamless **talk-to-your-docs** experience, transforming documents search and summary. Simply connect the application with your document sources. Then, ask a question, and the agents will work with you to achieve your goals.
 """
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.14"
 
 dependencies = [
     "datarobot>=3.8.2",
@@ -12,11 +12,14 @@ dependencies = [
     "langgraph-checkpoint>=3.0.0",
     "litellm>=1.79.3",
     "pulumi>=3.175.0",
-    "pulumi-datarobot>=0.10.22",
+    "pulumi-datarobot>=0.10.27",
     "pulumi-command>=1.1.3",
     "jinja2>=3.1.5,<4.0",
     "ipdb>=0.13.13",
     "rpdb>=0.2.0",
+    "urllib3>=2.6.3",
+    "langchain-core>=1.2.5,<2.0.0",
+    "aiohttp>=3.13.3",
 ]
 
 [project.optional-dependencies]
@@ -28,4 +31,4 @@ dev = [
 ]
 
 [tool.mypy]
-exclude = "configurations"
+exclude = ["configurations", "tests"]

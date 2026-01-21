@@ -74,7 +74,7 @@ def mock_message_repo() -> AsyncMock:
 @pytest.fixture
 def mock_api_connection_error() -> litellm.exceptions.APIConnectionError:
     """Fixture to create a standard APIConnectionError for testing."""
-    error_message = '{"message": "Request is too large. The request size is 278284656 bytes and the maximum message size allowed by the server is 11264MB"}'
+    error_message = "Request is too large"
     return litellm.exceptions.APIConnectionError(
         f"litellm.APIConnectionError: DatarobotException - {error_message}",
         llm_provider="datarobot",
@@ -286,8 +286,13 @@ def test_chat_completions_with_invalid_knowledge_base_uuid(
 
         called_kwargs = mock_update_msg.call_args.kwargs
         assert called_kwargs["uuid"] == sample_llm_message.uuid
+        # Error includes component prefix
+        expected_component = (
+            "AI Agent" if model == "ttmdocs-agents" else "LLM Blueprint"
+        )
         assert called_kwargs["update"] == MessageUpdate(
-            error="400: Invalid knowledge_base_id format", in_progress=False
+            error=f"{expected_component}: 400: Invalid knowledge_base_id format",
+            in_progress=False,
         )
 
 
@@ -421,8 +426,13 @@ def test_chat_completions_with_invalid_file_ids(
 
         called_kwargs = mock_update_msg.call_args.kwargs
         assert called_kwargs["uuid"] == sample_llm_message.uuid
+        # Error includes component prefix
+        expected_component = (
+            "AI Agent" if model == "ttmdocs-agents" else "LLM Blueprint"
+        )
         assert called_kwargs["update"] == MessageUpdate(
-            error="400: Invalid file_id format: not-a-valid-uuid", in_progress=False
+            error=f"{expected_component}: 400: Invalid file_id format: not-a-valid-uuid",
+            in_progress=False,
         )
 
 
@@ -645,8 +655,12 @@ def test_chat_completion_api_connection_error(
 
         called_kwargs = mock_update_msg.call_args.kwargs
         assert called_kwargs["uuid"] == sample_llm_message.uuid
+        # Error is cleaned up with component prefix
+        expected_component = (
+            "AI Agent" if model == "ttmdocs-agents" else "LLM Blueprint"
+        )
         assert called_kwargs["update"] == MessageUpdate(
-            error='litellm.APIConnectionError: litellm.APIConnectionError: DatarobotException - {"message": "Request is too large. The request size is 278284656 bytes and the maximum message size allowed by the server is 11264MB"}',
+            error=f"{expected_component}: Request is too large",
             in_progress=False,
         )
 
@@ -695,7 +709,7 @@ def test_chat_completion_api_connection_error_with_files(
         mock_augment.return_value = "augmented message with files"
 
         # Different error scenario
-        error_message = '{"message": "Connection timeout"}'
+        error_message = "Connection timeout"
         mock_acompletion.side_effect = litellm.exceptions.APIConnectionError(
             f"litellm.APIConnectionError: {error_message}",
             llm_provider="datarobot",
@@ -721,8 +735,12 @@ def test_chat_completion_api_connection_error_with_files(
 
         called_kwargs = mock_update_msg.call_args.kwargs
         assert called_kwargs["uuid"] == sample_llm_message.uuid
+        # Error is cleaned up with component prefix and message extracted from JSON
+        expected_component = (
+            "AI Agent" if model == "ttmdocs-agents" else "LLM Blueprint"
+        )
         assert called_kwargs["update"] == MessageUpdate(
-            error='litellm.APIConnectionError: litellm.APIConnectionError: {"message": "Connection timeout"}',
+            error=f"{expected_component}: {error_message}",
             in_progress=False,
         )
 
@@ -779,7 +797,7 @@ def test_chat_completion_api_connection_error_with_knowledge_base(
         mock_augment.return_value = "test message"
 
         # Network error
-        error_message = '{"message": "Network unreachable"}'
+        error_message = "Network unreachable"
         mock_acompletion.side_effect = litellm.exceptions.APIConnectionError(
             f"litellm.APIConnectionError: {error_message}",
             llm_provider="datarobot",
@@ -803,7 +821,40 @@ def test_chat_completion_api_connection_error_with_knowledge_base(
 
         called_kwargs = mock_update_msg.call_args.kwargs
         assert called_kwargs["uuid"] == sample_llm_message.uuid
+        # Error is cleaned up with component prefix
+        expected_component = (
+            "AI Agent" if model == "ttmdocs-agents" else "LLM Blueprint"
+        )
         assert called_kwargs["update"] == MessageUpdate(
-            error='litellm.APIConnectionError: litellm.APIConnectionError: {"message": "Network unreachable"}',
+            error=f"{expected_component}: {error_message}",
             in_progress=False,
         )
+
+
+# Unit tests for error formatting helpers
+class TestErrorFormatting:
+    """Tests for error message formatting helpers."""
+
+    def test_clean_error_message_strips_prefixes(self) -> None:
+        """Test that error message prefixes are stripped."""
+        from app.api.v1.chat import _clean_error_message
+
+        assert (
+            _clean_error_message("litellm.APIConnectionError: some error")
+            == "some error"
+        )
+        assert _clean_error_message("DatarobotException - some error") == "some error"
+        assert (
+            _clean_error_message(
+                "litellm.InternalServerError: InternalServerError: OpenAIException - ERROR: actual error"
+            )
+            == "actual error"
+        )
+
+    def test_is_wakeup_error(self) -> None:
+        """Test wake-up error detection."""
+        from app.api.v1.chat import _is_wakeup_error
+
+        assert _is_wakeup_error("waiting for workload reach > 0 replicas")
+        assert _is_wakeup_error("Inference server is unavailable")
+        assert not _is_wakeup_error("some other error")

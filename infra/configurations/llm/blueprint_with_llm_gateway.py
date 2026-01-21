@@ -18,6 +18,7 @@ multiple LLMs through a single deployment with all of the DataRobot governance
 and monitoring baked in.
 """
 
+import os
 import datarobot as dr
 import pulumi
 import pulumi_datarobot as datarobot
@@ -53,7 +54,7 @@ REQUIRED_FEATURE_FLAGS = {
     # with the LLMs in use in the agent.
     "ENABLE_LLM_AWS_ANTHROPIC_CLAUDE_SONNET_4_V1": True,
     "ENABLE_LLM_AWS_ANTHROPIC_CLAUDE_3_7_SONNET": True,
-    "ENABLE_LLM_AZURE_OPENAI_GPT_4_O": True,
+    "ENABLE_LLM_AZURE_OPENAI_GPT_5_MINI": True,
     "ENABLE_LLM_GCP_GEMINI_25_FLASH": True,
 }
 
@@ -75,24 +76,28 @@ print("\n.   - ".join(
     [
         f"{model['model']}:{model['llmId']}"
         for model in data["data"]
-        if not model["isDeprecated"] and model["isActive"]
+        if model["isActive"]
     ]
 ))
 """
-default_model: str = "bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0"
-default_llm_id: str = "amazon-anthropic-claude-3-7-sonnet-v1"
+default_model: str = os.environ.get(
+    "LLM_DEFAULT_MODEL", "datarobot/azure/gpt-5-mini-2025-08-07"
+)
+default_llm_id: str = os.environ.get(
+    "LLM_DEFAULT_LLM_ID",
+    "azure-openai-gpt-5-mini",  # External LLM ID from the Playground
+)
 # Verify everything is configured properly for this configuration option.
 validate_feature_flags(REQUIRED_FEATURE_FLAGS)
 
 # This does a quick check that validates the selected model is available
 # by checking the LLM Gateway. If it isn't, it will raise an error
-# with the list of models that are available and not deprecated.
+# with the list of models that are available and active.
 verify_llm_gateway_model_availability(default_model)
 
 # LiteLLM support DataRobot as a provider, so this validates
 # everything is working and the default LLM you've chosen is available
-# by adding `datarobot/` in front of the model
-verify_llm(f"datarobot/{default_model}")
+verify_llm(f"{default_model}")
 
 playground = datarobot.Playground(
     use_case_id=use_case.id,
@@ -104,7 +109,7 @@ llm_blueprint = datarobot.LlmBlueprint(
     playground_id=playground.id,
     llm_id=default_llm_id,
     llm_settings=datarobot.LlmBlueprintLlmSettingsArgs(
-        max_completion_length=2048,
+        max_completion_length=12800,
         temperature=0.1,
         top_p=None,
     ),

@@ -18,7 +18,7 @@ from typing import Any
 import duckdb
 from typing_extensions import Self
 
-from core.persistent_fs.dr_file_system import DRFileSystem, calculate_checksum
+from .dr_file_system import DRFileSystem, calculate_checksum
 
 
 def _get_fs_entity() -> DRFileSystem | None:

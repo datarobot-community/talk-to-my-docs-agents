@@ -176,7 +176,7 @@ def init_logging(
 
 
 def get_logger(
-    name: str = "RecipeTalkToMyDocs",
+    name: str = "talk-to-my-docs",
     level: LogLevel = LogLevel.INFO,
     stream: Any = sys.stdout,
     format_type: FormatType = "text",

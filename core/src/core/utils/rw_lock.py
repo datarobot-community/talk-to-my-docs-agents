@@ -117,7 +117,7 @@ class ThreadReadWriteLock(AbstractReadWriteLock):
 
 class MockReadWriteLock(AbstractReadWriteLock):
     """
-    Have the same interface as ThreadReadWriteLock but do no blocking.
+    Has the same interface as ThreadReadWriteLock but do no blocking.
     Should be used for cases when lock is no need, like interaction with external DB.
     """
 

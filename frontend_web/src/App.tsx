@@ -21,6 +21,7 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { Spinner } from '@/components/ui/spinner';
 import { useAppState } from '@/state';
 
+
 import './App.css';
 import { useLlmCatalog } from '@/api/chat/hooks';
 import { useCurrentUser } from '@/api/auth/hooks.ts';

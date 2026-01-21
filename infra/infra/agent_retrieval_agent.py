@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+from pathlib import Path
 import re
-from typing import cast
+import shutil
+import subprocess
+from typing import cast, Final, Optional, Any, Sequence
+import yaml  # type: ignore[import-untyped]
 
-import datarobot
+import datarobot as dr
 import pulumi
 import pulumi_datarobot
 from datarobot_pulumi_utils.pulumi import export
@@ -27,32 +31,12 @@ from datarobot_pulumi_utils.schema.custom_models import (
 )
 from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
 
+
 from . import project_dir, use_case
 
-try:
-    from .llm import prediction_environment as llm_prediction_environment
+from .llm import custom_model_runtime_parameters as llm_custom_model_runtime_parameters
 
-    if (
-        llm_prediction_environment.platform
-        == datarobot.enums.PredictionEnvironmentPlatform.DATAROBOT_SERVERLESS
-    ):
-        prediction_environment = llm_prediction_environment
-    else:
-        # Non-default name to ensure this gets created as a distinct prediction environment.
-        prediction_environment = pulumi_datarobot.PredictionEnvironment(
-            resource_name=f"Talk to My Docs Agent Prediction Environment [{PROJECT_NAME}]",
-            platform=datarobot.enums.PredictionEnvironmentPlatform.DATAROBOT_SERVERLESS,
-        )
-except ImportError:
-    prediction_environment = pulumi_datarobot.PredictionEnvironment(
-        resource_name=f"Talk to My Docs Prediction Environment [{PROJECT_NAME}]",
-        platform=datarobot.enums.PredictionEnvironmentPlatform.DATAROBOT_SERVERLESS,
-    )
-
-# To use the LLM DataRobot Deployment in your Agent, uncomment the line below
-from .llm import custom_model_runtime_parameters as llm_datarobot_app_runtime_parameters
-
-DEFAULT_EXECUTION_ENVIRONMENT = "[DataRobot] Python 3.11 GenAI Agents"
+DEFAULT_EXECUTION_ENVIRONMENT = "Python 3.11 GenAI Agents"
 
 EXCLUDE_PATTERNS = [
     re.compile(pattern)
@@ -72,9 +56,7 @@ EXCLUDE_PATTERNS = [
 
 __all__ = [
     "agent_retrieval_agent_application_name",
-    "agent_retrieval_agent_resource_name",
     "agent_retrieval_agent_application_path",
-    "agent_retrieval_agent_execution_environment_id",
     "agent_retrieval_agent_prediction_environment",
     "agent_retrieval_agent_custom_model",
     "agent_retrieval_agent_agent_deployment_id",
@@ -85,11 +67,61 @@ __all__ = [
 ]
 
 agent_retrieval_agent_application_name: str = "agent_retrieval_agent"
-agent_retrieval_agent_resource_name: str = "[agent_retrieval_agent]"
+agent_retrieval_agent_asset_name: str = f"[{PROJECT_NAME}] [agent_retrieval_agent]"
 agent_retrieval_agent_application_path = project_dir.parent / "agent_retrieval_agent"
 
 
-def get_custom_model_files(custom_model_folder: str) -> list[tuple[str, str]]:
+def _generate_metadata_yaml(
+    agent_name: str,
+    custom_model_folder: str,
+    runtime_parameter_values: Sequence[
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+    ],
+) -> None:
+    """Generate model-metadata.yaml file from scratch with runtime parameters.
+
+    Args:
+        agent_name: Name of the agent
+        custom_model_folder: Path to the custom model folder
+        runtime_parameter_values: List of runtime parameter definitions
+
+    Raises:
+        OSError: If unable to write the metadata file
+    """
+    metadata = {
+        "name": agent_name,
+        "type": "inference",
+        "targetType": "agenticworkflow",
+        "runtimeParameterDefinitions": [
+            {"fieldName": param.key, "type": param.type}
+            for param in runtime_parameter_values
+        ]
+        or [],
+    }
+
+    # Write the file using yaml library for proper formatting
+    metadata_output_path = Path(custom_model_folder) / "model-metadata.yaml"
+    metadata_output_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_output_path.write_text(
+        yaml.dump(
+            metadata, default_flow_style=False, sort_keys=False, explicit_start=True
+        ),
+        encoding="utf-8",
+    )
+
+
+def get_custom_model_files(
+    custom_model_folder: str,
+    runtime_parameter_values: Sequence[
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+    ],
+) -> list[tuple[str, str]]:
+    # generate model-metadata.yaml file in the custom model folder
+    _generate_metadata_yaml(
+        agent_name="agent_retrieval_agent",
+        custom_model_folder=custom_model_folder,
+        runtime_parameter_values=runtime_parameter_values,
+    )
     # Get all files from application path, following symlinks
     # When we've upgraded to Python 3.13 we can use Path.glob(reduce_symlinks=True)
     # https://docs.python.org/3.13/library/pathlib.html#pathlib.Path.glob
@@ -111,21 +143,183 @@ def get_custom_model_files(custom_model_folder: str) -> list[tuple[str, str]]:
     return source_files
 
 
+def synchronize_pyproject_dependencies():
+    pyproject_toml_path = os.path.join(
+        str(agent_retrieval_agent_application_path), "pyproject.toml"
+    )
+    uv_lock_path = os.path.join(str(agent_retrieval_agent_application_path), "uv.lock")
+    custom_model_folder = str(
+        os.path.join(str(agent_retrieval_agent_application_path), "agentic_workflow")
+    )
+    docker_context_folder = str(
+        os.path.join(str(agent_retrieval_agent_application_path), "docker_context")
+    )
+
+    # Check if pyproject.toml exists in the application path
+    if not os.path.exists(pyproject_toml_path):
+        return
+
+    # Copy pyproject.toml to custom_model folder if it exists
+    if os.path.exists(custom_model_folder):
+        custom_model_pyproject_path = os.path.join(
+            custom_model_folder, "pyproject.toml"
+        )
+        shutil.copy2(pyproject_toml_path, custom_model_pyproject_path)
+        if os.path.exists(uv_lock_path):
+            custom_model_uv_lock_path = os.path.join(custom_model_folder, "uv.lock")
+            shutil.copy2(uv_lock_path, custom_model_uv_lock_path)
+
+    # Copy pyproject.toml to docker_context folder if it exists
+    if os.path.exists(docker_context_folder):
+        docker_context_pyproject_path = os.path.join(
+            docker_context_folder, "pyproject.toml"
+        )
+        shutil.copy2(pyproject_toml_path, docker_context_pyproject_path)
+        if os.path.exists(uv_lock_path):
+            docker_context_uv_lock_path = os.path.join(docker_context_folder, "uv.lock")
+            shutil.copy2(uv_lock_path, docker_context_uv_lock_path)
+
+
+def maybe_import_from_module(module: str, object_name: str) -> Optional[Any]:
+    """Attempt to import an object from a module.
+
+    Args:
+        module: The module name to import from (can include relative imports like ".module_name")
+        object_name: The name of the object to import from the module
+
+    Returns:
+        The imported object if successful, None otherwise
+    """
+    if not module:
+        return None
+
+    try:
+        import importlib
+
+        # Ensure relative import format
+        module_path = module if module.startswith(".") else f".{module}"
+        imported_module = importlib.import_module(module_path, package=__package__)
+        return getattr(imported_module, object_name, None)
+    except (ImportError, AttributeError):
+        return None
+
+
+def get_mcp_runtime_parameters_from_env() -> list[
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+]:
+    mcp_runtime_parameters: list[
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+    ] = []
+
+    # Add MCP runtime parameters if configured
+    if os.environ.get("MCP_DEPLOYMENT_ID"):
+        mcp_deployment_id = os.environ["MCP_DEPLOYMENT_ID"]
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="MCP_DEPLOYMENT_ID",
+                type="string",
+                value=mcp_deployment_id,
+            )
+        )
+        pulumi.info(f"MCP configured with DataRobot MCP Server: {mcp_deployment_id}")
+
+    # Allow external mcp server. Currently, code will use MCP_DEPLOYMENT_ID first and if that is empty
+    # then use the EXTERNAL_MCP_URL
+    if os.environ.get("EXTERNAL_MCP_URL"):
+        external_mcp_url = os.environ["EXTERNAL_MCP_URL"].rstrip("/")
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="EXTERNAL_MCP_URL",
+                type="string",
+                value=external_mcp_url,
+            )
+        )
+        pulumi.info(f"MCP configured with external server: {external_mcp_url}")
+
+    # Add optional EXTERNAL_MCP_HEADERS
+    external_mcp_headers = os.environ.get("EXTERNAL_MCP_HEADERS")
+    if external_mcp_headers:
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="EXTERNAL_MCP_HEADERS",
+                type="string",
+                value=external_mcp_headers,
+            )
+        )
+        pulumi.info(f"External MCP configured with headers: {external_mcp_headers}")
+
+    # Add optional EXTERNAL_MCP_TRANSPORT parameter
+    external_mcp_transport = os.environ.get("EXTERNAL_MCP_TRANSPORT")
+    if external_mcp_transport:
+        external_mcp_transport = os.environ["EXTERNAL_MCP_TRANSPORT"]
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="EXTERNAL_MCP_TRANSPORT",
+                type="string",
+                value=external_mcp_transport,
+            )
+        )
+        pulumi.info(f"External MCP configured with transport: {external_mcp_transport}")
+
+    return mcp_runtime_parameters
+
+
+def get_mcp_custom_model_runtime_parameters() -> list[
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+]:
+    """
+    Load MCP runtime parameters from the MCP Deployment module if available,
+    otherwise fall back to environment variables.
+    """
+    mcp_module = ""
+
+    mcp_params = maybe_import_from_module(
+        mcp_module, "mcp_custom_model_runtime_parameters"
+    )
+    if mcp_params is not None:
+        return mcp_params
+
+    return get_mcp_runtime_parameters_from_env()
+
+
+synchronize_pyproject_dependencies()
+pulumi.info("NOTE: [unknown] values will be populated after performing an update.")  # fmt: skip
+
+
+docker_execution_env_name = f"Talk to My Docs Agent Execution Environment [docker_context] [{agent_retrieval_agent_application_name}]"
+
+defined_docker_image = False
+
 # Start of Pulumi settings and application infrastructure
-if len(os.environ.get("DATAROBOT_AGENT_EXECUTION_ENVIRONMENT_ID", "")) > 0:
+specified_env_id = os.environ.get("DATAROBOT_AGENT_EXECUTION_ENVIRONMENT_ID", "")
+if len(specified_env_id) > 0:
     agent_retrieval_agent_execution_environment_id = os.environ[
         "DATAROBOT_AGENT_EXECUTION_ENVIRONMENT_ID"
     ]
+    agent_retrieval_agent_execution_environment_version_id = os.environ.get(
+        "DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID"
+    )
+    if (
+        agent_retrieval_agent_execution_environment_version_id is not None
+        and not re.match(
+            r"^[a-f\d]{24}$",
+            str(agent_retrieval_agent_execution_environment_version_id),
+        )
+    ):
+        pulumi.warn(
+            "Invalid execution environment version ID provided, using latest version."
+        )
+        agent_retrieval_agent_execution_environment_version_id = None
 
-    if agent_retrieval_agent_execution_environment_id == DEFAULT_EXECUTION_ENVIRONMENT:
+    if DEFAULT_EXECUTION_ENVIRONMENT in agent_retrieval_agent_execution_environment_id:
         pulumi.info(
             "Using default GenAI Agents execution environment "
             + agent_retrieval_agent_execution_environment_id
         )
         agent_retrieval_agent_execution_environment = pulumi_datarobot.ExecutionEnvironment.get(
             id=RuntimeEnvironments.PYTHON_311_GENAI_AGENTS.value.id,
-            resource_name="Talk to My Docs Agent Execution Environment [PRE-EXISTING] "
-            + agent_retrieval_agent_resource_name,
+            version_id=agent_retrieval_agent_execution_environment_version_id,
+            resource_name=f"Talk to My Docs Agent Execution Environment [PRE-EXISTING] [{agent_retrieval_agent_application_name}]",
         )
     else:
         pulumi.info(
@@ -134,10 +328,11 @@ if len(os.environ.get("DATAROBOT_AGENT_EXECUTION_ENVIRONMENT_ID", "")) > 0:
         )
         agent_retrieval_agent_execution_environment = pulumi_datarobot.ExecutionEnvironment.get(
             id=agent_retrieval_agent_execution_environment_id,
-            resource_name="Talk to My Docs Agent Execution Environment [PRE-EXISTING] "
-            + agent_retrieval_agent_resource_name,
+            version_id=agent_retrieval_agent_execution_environment_version_id,
+            resource_name=f"Talk to My Docs Agent Execution Environment [PRE-EXISTING] [{agent_retrieval_agent_application_name}]",
         )
 else:
+    agent_retrieval_agent_exec_env_use_cases = ["customModel", "notebook"]
     if os.path.exists(
         os.path.join(
             str(agent_retrieval_agent_application_path), "docker_context.tar.gz"
@@ -146,36 +341,103 @@ else:
         pulumi.info(
             "Using prebuilt Dockerfile docker_context.tar.gz to run the execution environment"
         )
+
         agent_retrieval_agent_execution_environment = pulumi_datarobot.ExecutionEnvironment(
-            resource_name="Talk to My Docs Execution Environment [docker_context] "
-            + agent_retrieval_agent_resource_name,
+            resource_name=docker_execution_env_name,
             programming_language="python",
             description="Talk to My Docs Execution Environment [agent docker_context]",
             docker_image=os.path.join(
                 str(agent_retrieval_agent_application_path), "docker_context.tar.gz"
             ),
-            use_cases=["customModel", "notebook"],
+            use_cases=agent_retrieval_agent_exec_env_use_cases,
         )
-    else:
+        defined_docker_image = True
+    elif os.path.exists(
+        os.path.join(str(agent_retrieval_agent_application_path), "docker_context")
+    ):
         pulumi.info("Using docker_context folder to compile the execution environment")
+        execution_env_name = f"Talk to My Docs Agent Execution Environment [docker_context] [{agent_retrieval_agent_application_name}]"
+
         agent_retrieval_agent_execution_environment = pulumi_datarobot.ExecutionEnvironment(
-            resource_name="Talk to My Docs Agent Execution Environment [docker_context] "
-            + agent_retrieval_agent_resource_name,
+            resource_name=docker_execution_env_name,
             programming_language="python",
             description="Talk to My Docs Execution Environment [agent docker_context]",
             docker_context_path=os.path.join(
                 str(agent_retrieval_agent_application_path), "docker_context"
             ),
-            use_cases=["customModel", "notebook"],
+            use_cases=agent_retrieval_agent_exec_env_use_cases,
+        )
+        defined_docker_image = True
+    else:
+        pulumi.info(
+            "No docker context defined to build custom execution environment, using default"
         )
 
+        agent_retrieval_agent_execution_environment = pulumi_datarobot.ExecutionEnvironment.get(
+            id=RuntimeEnvironments.PYTHON_311_GENAI_AGENTS.value.id,
+            resource_name=f"Talk to My Docs Agent Execution Environment [PRE-EXISTING] [{agent_retrieval_agent_application_name}]",
+        )
+
+if not defined_docker_image:
+    # This is a hack around a bug in DataRobot's IAC. If you start a stack using a custom execution environment
+    # from a docker context but then migrate to a pre-existing execution environment, the IAC would treat that
+    # as the prior custom environment being unused and try to delete it
+    try:
+        # There seems to be no good way to do this with pulumi SDK.
+        # (Stack references can only refer to other stacks. I could not get stack automation to cooperate.)
+        previous_id = subprocess.run(
+            [
+                "pulumi",
+                "stack",
+                "output",
+                f"Agent Execution Environment ID [{agent_retrieval_agent_application_name}]",
+            ],
+            text=True,
+            check=True,
+            capture_output=True,
+        ).stdout.strip()
+        phantom_execution_env = pulumi_datarobot.ExecutionEnvironment.get(
+            resource_name=docker_execution_env_name, id=previous_id
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+
+# Prepare runtime parameters for agent custom model deployment
+agent_runtime_parameter_values: list[
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+] = [] + llm_custom_model_runtime_parameters + get_mcp_custom_model_runtime_parameters()
+
+# Handle session secret key credential
+SESSION_SECRET_KEY: Final[str] = "SESSION_SECRET_KEY"
+
+if session_secret_key := os.environ.get(SESSION_SECRET_KEY):
+    pulumi.export(SESSION_SECRET_KEY, session_secret_key)
+    session_secret_cred = pulumi_datarobot.ApiTokenCredential(
+        f"Talk to My Docs Session Secret Key {agent_retrieval_agent_asset_name}",
+        args=pulumi_datarobot.ApiTokenCredentialArgs(api_token=str(session_secret_key)),
+    )
+    agent_runtime_parameter_values.append(
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+            type="credential",
+            key=SESSION_SECRET_KEY,
+            value=session_secret_cred.id,
+        ),
+    )
+
 agent_retrieval_agent_custom_model_files = get_custom_model_files(
-    str(os.path.join(str(agent_retrieval_agent_application_path), "custom_model"))
+    custom_model_folder=str(
+        os.path.join(str(agent_retrieval_agent_application_path), "agentic_workflow")
+    ),
+    runtime_parameter_values=agent_runtime_parameter_values,
+)
+
+custom_model_name = (
+    f"Talk to My Docs Agent Custom Model [{agent_retrieval_agent_application_name}]"
 )
 
 agent_retrieval_agent_custom_model = pulumi_datarobot.CustomModel(
-    resource_name="Talk to My Docs Agent Custom Model "
-    + agent_retrieval_agent_resource_name,
+    resource_name=custom_model_name,
     base_environment_id=agent_retrieval_agent_execution_environment.id,
     base_environment_version_id=agent_retrieval_agent_execution_environment.version_id,
     target_type="AgenticWorkflow",
@@ -183,46 +445,90 @@ agent_retrieval_agent_custom_model = pulumi_datarobot.CustomModel(
     language="python",
     use_case_ids=[use_case.id],
     files=agent_retrieval_agent_custom_model_files,
-    # runtime_parameter_values=[],
-    # To use the LLM DataRobot Deployment in your Agent, use the alternative parameter below
-    runtime_parameter_values=llm_datarobot_app_runtime_parameters,
+    runtime_parameter_values=agent_runtime_parameter_values,
 )
 
 agent_retrieval_agent_custom_model_endpoint = agent_retrieval_agent_custom_model.id.apply(
     lambda id: f"{os.getenv('DATAROBOT_ENDPOINT')}/genai/agents/fromCustomModel/{id}/chat/"
 )
 
+playground_name = f"Talk To My Docs Agentic Playground [{PROJECT_NAME}]"
+agent_retrieval_agent_playground = pulumi_datarobot.Playground(
+    name=playground_name,
+    resource_name=playground_name,
+    description="Experimentation Playground for " + agent_retrieval_agent_asset_name,
+    use_case_id=use_case.id,
+    playground_type="agentic",
+)
+
+llm_blueprint_name = f"Talk To My Docs Agent Blueprint [{PROJECT_NAME}]"
+
+agent_retrieval_agent_blueprint = pulumi_datarobot.LlmBlueprint(
+    name=llm_blueprint_name,
+    resource_name=llm_blueprint_name,
+    playground_id=agent_retrieval_agent_playground.id,
+    llm_id="chat-interface-custom-model",
+    llm_settings=pulumi_datarobot.LlmBlueprintLlmSettingsArgs(
+        custom_model_id=agent_retrieval_agent_custom_model.id
+    ),
+    prompt_type="ONE_TIME_PROMPT",
+)
+
+datarobot_url = (
+    os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2")
+    .rstrip("/")
+    .rstrip("/api/v2")
+)
+
+agent_retrieval_agent_playground_url = pulumi.Output.format(
+    "{0}/usecases/{1}/agentic-playgrounds/{2}/comparison/chats",
+    datarobot_url,
+    use_case.id,
+    agent_retrieval_agent_playground.id,
+)
+
+
 # Export the IDs of the created resources
-pulumi.export("Agent Use Case ID " + agent_retrieval_agent_resource_name, use_case.id)
 pulumi.export(
-    "Agent Execution Environment ID " + agent_retrieval_agent_resource_name,
-    agent_retrieval_agent_execution_environment.id,
+    f"Agent Use Case ID [{agent_retrieval_agent_application_name}]", use_case.id
 )
 pulumi.export(
-    "Agent Custom Model ID " + agent_retrieval_agent_resource_name,
+    f"Agent Custom Model ID [{agent_retrieval_agent_application_name}]",
     agent_retrieval_agent_custom_model.id,
 )
 pulumi.export(
-    "Agent Custom Model Chat Endpoint " + agent_retrieval_agent_resource_name,
+    f"Agent Execution Environment ID [{agent_retrieval_agent_application_name}]",
+    agent_retrieval_agent_execution_environment.id,
+)
+pulumi.export(
+    f"Agent Custom Model Chat Endpoint [{agent_retrieval_agent_application_name}]",
     agent_retrieval_agent_custom_model_endpoint,
 )
+pulumi.export("Agent Playground URL " + agent_retrieval_agent_asset_name, agent_retrieval_agent_playground_url)  # fmt: skip
 
 
 agent_retrieval_agent_agent_deployment_id: pulumi.Output[str] = cast(
     pulumi.Output[str], "None"
 )
+agent_retrieval_agent_deployment_endpoint: pulumi.Output[str] = cast(
+    pulumi.Output[str], "None"
+)
 if os.environ.get("AGENT_DEPLOY") != "0":
-    agent_retrieval_agent_prediction_environment = prediction_environment
-
-    agent_retrieval_agent_registered_model_args = RegisteredModelArgs(
-        resource_name="Talk to My Docs Agent Registered Model "
-        + agent_retrieval_agent_resource_name,
+    prediction_env_name = f"Talk To My Docs Agent Prediction Environment [{agent_retrieval_agent_application_name}]"
+    agent_retrieval_agent_prediction_environment = pulumi_datarobot.PredictionEnvironment(
+        resource_name=f"Talk to My Docs Agent Prediction Environment [{PROJECT_NAME}]",
+        platform=dr.enums.PredictionEnvironmentPlatform.DATAROBOT_SERVERLESS,
     )
 
+    registered_model_name = f"Talk to My Docs Agent Registered Model [{agent_retrieval_agent_application_name}]"
+    agent_retrieval_agent_registered_model_args = RegisteredModelArgs(
+        resource_name=registered_model_name,
+    )
+
+    deployment_name = f"Talk to My Docs Agent Chat Deployment [{agent_retrieval_agent_application_name}]"
     agent_retrieval_agent_deployment_args = DeploymentArgs(
-        resource_name="Talk to My Docs Agent Deployment "
-        + agent_retrieval_agent_resource_name,
-        label=f"Deployment [{PROJECT_NAME}] " + agent_retrieval_agent_resource_name,
+        resource_name=f"Talk to My Docs Agent Deployment [{agent_retrieval_agent_application_name}]",
+        label=deployment_name,
         association_id_settings=pulumi_datarobot.DeploymentAssociationIdSettingsArgs(
             column_names=["association_id"],
             auto_generate_id=False,
@@ -235,14 +541,13 @@ if os.environ.get("AGENT_DEPLOY") != "0":
         ),
         predictions_settings=(
             pulumi_datarobot.DeploymentPredictionsSettingsArgs(
-                min_computes=0, max_computes=2
+                min_computes=0, max_computes=2, resource_bundle_id="cpu.medium"
             )
         ),
     )
 
     agent_retrieval_agent_agent_deployment = CustomModelDeployment(
-        resource_name="Talk to My Docs Agent Chat Deployment "
-        + agent_retrieval_agent_resource_name,
+        resource_name=deployment_name,
         use_case_ids=[use_case.id],
         custom_model_version_id=agent_retrieval_agent_custom_model.version_id,
         prediction_environment=agent_retrieval_agent_prediction_environment,
@@ -252,12 +557,17 @@ if os.environ.get("AGENT_DEPLOY") != "0":
     agent_retrieval_agent_agent_deployment_id = (
         agent_retrieval_agent_agent_deployment.id.apply(lambda id: f"{id}")
     )
-    agent_retrieval_agent_deployment_endpoint = agent_retrieval_agent_agent_deployment.id.apply(
-        lambda id: f"{os.getenv('DATAROBOT_ENDPOINT')}/genai/agents/fromCustomModel/{id}/chat/"
+    agent_retrieval_agent_deployment_endpoint = (
+        agent_retrieval_agent_agent_deployment.id.apply(
+            lambda id: f"{os.getenv('DATAROBOT_ENDPOINT')}/deployments/{id}"
+        )
+    )
+    agent_retrieval_agent_deployment_completions_endpoint = agent_retrieval_agent_agent_deployment.id.apply(
+        lambda id: f"{os.getenv('DATAROBOT_ENDPOINT')}/deployments/{id}/chat/completions"
     )
 
     pulumi.export(
-        "Agent Deployment ID " + agent_retrieval_agent_resource_name,
+        f"Agent Deployment ID [{agent_retrieval_agent_application_name}]",
         agent_retrieval_agent_agent_deployment.id,
     )
     export(
@@ -265,8 +575,8 @@ if os.environ.get("AGENT_DEPLOY") != "0":
         agent_retrieval_agent_agent_deployment.id,
     )
     pulumi.export(
-        "Agent Deployment Chat Endpoint " + agent_retrieval_agent_resource_name,
-        agent_retrieval_agent_deployment_endpoint,
+        f"Agent Deployment Chat Endpoint [{agent_retrieval_agent_application_name}]",
+        agent_retrieval_agent_deployment_completions_endpoint,
     )
 
 agent_retrieval_agent_app_runtime_parameters = [
@@ -274,5 +584,10 @@ agent_retrieval_agent_app_runtime_parameters = [
         key=agent_retrieval_agent_application_name.upper() + "_DEPLOYMENT_ID",
         type="string",
         value=agent_retrieval_agent_agent_deployment_id,
+    ),
+    pulumi_datarobot.ApplicationSourceRuntimeParameterValueArgs(
+        key=agent_retrieval_agent_application_name.upper() + "_ENDPOINT",
+        type="string",
+        value=agent_retrieval_agent_deployment_endpoint,
     ),
 ]

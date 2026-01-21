@@ -186,3 +186,8 @@ cython_debug/
 Pulumi.*.yaml
 
 .DS_Store
+# Currently we do not customize the translations, so we can ignore this directory
+.chainlit/translations
+
+# Rendered jinja template for runtime parameters
+agentic_workflow/model-metadata.yaml

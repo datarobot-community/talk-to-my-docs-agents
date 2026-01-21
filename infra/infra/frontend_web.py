@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import hashlib
 from pathlib import Path
 from typing import List
 
 import pulumi_command as command
-
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 
 project_dir = Path(__file__).parent.parent.parent
@@ -70,7 +70,7 @@ def _frontend_triggers(frontend_dir: Path) -> List[str]:
     return [digest]
 
 
-def build_frontend():
+def build_frontend() -> command.local.Command:
     """
     Build the frontend application before deploying infrastructure.
     Split into two stages: install dependencies and build application.

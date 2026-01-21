@@ -15,7 +15,7 @@
 import os
 import re
 import textwrap
-from typing import Final, Sequence
+from typing import Any, Final, Sequence, cast
 
 import pulumi
 from .frontend_web import frontend_web
@@ -39,9 +39,12 @@ database_uri = os.environ.get(
 STORAGE_PATH: Final[str] = "STORAGE_PATH"
 storage_path = os.environ.get(STORAGE_PATH, "/tmp/ttmdocs/.data/storage")
 
+required_key_scope_level: str = ""
+
 EXCLUDE_PATTERNS = [
     re.compile(pattern)
     for pattern in [
+        r".*htmlcov/.*",
         r".*tests/.*",
         r".*\.coverage",
         r".*\.DS_Store",
@@ -208,6 +211,13 @@ general_runtime_params = [
         value=storage_path,
     ),
 ]
+custom_model_credential_runtime_parameters = [
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+        type="credential",
+        key=SESSION_SECRET_KEY,
+        value=session_secret_cred.id,
+    ),
+]
 
 web_app_runtime_parameters: list[
     pulumi_datarobot.ApplicationSourceRuntimeParameterValueArgs
@@ -218,7 +228,12 @@ web_app_runtime_parameters: list[
     + general_runtime_params
 )
 
-web_app_source = pulumi_datarobot.ApplicationSource(
+web_app_source = pulumi_datarobot.ApplicationSource(  # type: ignore[call-overload]
+    resource_name=cast(str, web_app_source_args["resource_name"]),
+    base_environment_id=cast(Any, web_app_source_args["base_environment_id"]),
+    base_environment_version_id=cast(
+        Any, web_app_source_args.get("base_environment_version_id")
+    ),
     files=frontend_web.stdout.apply(
         lambda _: get_web_app_files(
             runtime_parameter_values=web_app_runtime_parameters,
@@ -229,15 +244,17 @@ web_app_source = pulumi_datarobot.ApplicationSource(
     resources=pulumi_datarobot.ApplicationSourceResourcesArgs(
         resource_label=CustomAppResourceBundles.CPU_XL.value.id,
     ),
-    **web_app_source_args,  # type: ignore[call-overload]
+    required_key_scope_level=required_key_scope_level,
 )
 
-web_app = pulumi_datarobot.CustomApplication(
+web_app = pulumi_datarobot.CustomApplication(  # type: ignore[call-overload]
     resource_name=web_app_resource_name,
     source_version_id=web_app_source.version_id,
     use_case_ids=[use_case.id],
     allow_auto_stopping=True,
     resources=web_app_source.resources,  # type: ignore
+    required_key_scope_level=cast(Any, web_app_source.required_key_scope_level),
+    opts=pulumi.ResourceOptions(depends_on=[web_app_source]),
 )
 
 pulumi.export(web_app_env_name, web_app.id)

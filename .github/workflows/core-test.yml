@@ -50,13 +50,12 @@ jobs:
         working-directory: core
         run: task lint-check
 
-# TODO: uncomment when tests are there
-#      - name: Test
-#        working-directory: core
-#        run: task test
-#
-#      - name: Get Cover
-#        uses: orgoro/coverage@v3.2
-#        with:
-#          coverageFile: core/.coverage.xml
-#          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test
+        working-directory: core
+        run: task test
+
+      - name: Get Cover
+        uses: orgoro/coverage@v3.2
+        with:
+          coverageFile: core/.coverage.xml
+          token: ${{ secrets.GITHUB_TOKEN }}

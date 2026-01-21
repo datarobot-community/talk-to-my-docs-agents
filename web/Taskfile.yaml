@@ -7,6 +7,19 @@ env:
   CALCULATED_PYTHONPATH: "{{ if and .PYTHONPATH .NOTEBOOK_ID }}{{ else }}{{ .PYTHONPATH }}{{ end }}"
 
 tasks:
+
+  auth-check:
+    silent: true
+    desc: "🔐 Check authentication prerequisites"
+    cmds:
+      - |
+        if command -v dr &> /dev/null && dr auth help 2>&1 | grep -q "check"; then
+          echo "🔐 Checking authentication.."
+          dr auth check
+        else
+          echo "ℹ️  Skipping auth check (not available)"
+        fi
+
   install:
     desc: "🔧 Install dependencies"
     cmds:
@@ -27,9 +40,13 @@ tasks:
   dev:
     silent: true
     desc: "🔨 Run the development server"
+  dev:
+    silent: true
+    desc: "🔨 Run the development server"
     env:
       TEST_USER_EMAIL: "developer@example.com"
     deps:
+      - auth-check
       - build-frontend
       - migrate
     cmds:
@@ -43,6 +60,7 @@ tasks:
       TEST_USER_EMAIL: "developer@example.com"
       TEST_USER_API_KEY: "{{ .DATAROBOT_API_TOKEN }}"
     deps:
+      - auth-check
       - build-frontend
       - migrate
     cmds:
@@ -56,7 +74,7 @@ tasks:
       - echo "🧹 Running linters.."
       - uv run ruff format .
       - uv run ruff check . --fix
-      - uv run mypy --pretty .
+      - PYTHONPATH="$CALCULATED_PYTHONPATH" uv run mypy --pretty .
 
   lint-check:
     silent: true
@@ -64,14 +82,14 @@ tasks:
     cmds:
       - uv run ruff format --check .
       - uv run ruff check .
-      - uv run mypy --pretty .
+      - PYTHONPATH="$CALCULATED_PYTHONPATH" uv run mypy --pretty .
 
   test:
     silent: true
     desc: "🧪 Run tests"
     cmds:
       - echo "🧪 Running tests.."
-      - uv run pytest --cov --cov-report=html --cov-report=term --cov-report xml:.coverage.xml
+      - PYTHONPATH="$CALCULATED_PYTHONPATH" uv run pytest --cov --cov-report=html --cov-report=term --cov-report xml:.coverage.xml
 
   copyright:
     aliases: [license]

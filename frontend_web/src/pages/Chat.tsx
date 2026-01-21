@@ -49,7 +49,7 @@ const Chat = () => {
     if (messages.length === 0 || (!chatId && !chatSession.isLoading)) {
         return (
             <ChatSessionProvider value={chatSession}>
-                <div className="content-center justify-items-center w-full h-full">
+                <div className="flex flex-col items-center justify-center w-full h-full">
                     <div className="flex">
                         <img
                             src={drLogo}

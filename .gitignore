@@ -1,3 +1,6 @@
+/Taskfile.yml
+/Taskfile.gen.yaml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -189,3 +192,11 @@ package-lock.json
 # Pulumi output from the latest stack apply
 pulumi_config.json
 
+# DataRobot CLI stuff:
+#  .dr/state contains user-specific history and audit-trail while working with the CLI
+.datarobot/state/
+.datarobot/cli/state.yaml
+
+# Temporary files produced by dr
+agent_retrieval_agent/execute_output.json
+agent_retrieval_agent/datarobot-user-models.zip

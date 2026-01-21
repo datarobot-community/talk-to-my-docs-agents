@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.5.0] - 2026-01-21
+
+### Added
+
+- Added a new LLM configuration `infra/configurations/llm/gateway_direct.py` which skips creating an LLM model. (Faster initial deployment, but doesn't support the features - RAG, guardrails, tracing - of a deployed model.)
+- Filled out DataRobot playgrounds for agent and LLM custom models when deployed.
+- Better UX to indicate which component is not ready to serve the request (Agent vs LLM Blueprint vs LLM Gateway).
+- Updated `.env.template` to include `LLM_DEFAULT_MODEL` configuration.
+
+### Changed
+
+- Refactored `agent_retrieval_agent` to leverage [`datarobot_genai`](https://github.com/datarobot-oss/datarobot-genai) library, removing unneeded code.
+- Removed execution environment build (`agent_retrieval_agent/docker_context`) in favor of default agent execution environment, saving significant deployment time. This can be regenerated with `task agent:build-docker-image` for those needing to customize execution environments.
+- Increased maximum completion tokens limit for better response quality.
+- Refined expected output format for document summary.
+- CLI improvements for LLM default selection.
+- Updated component templates (fastapi-backend, llm, base, react) to latest versions.
+
+### Fixed
+
+- Fixed chat alignment in Firefox.
+- Fixed suggestions from the Agent.
+- Fixed issue with empty knowledge base response.
+- Updated dependencies to resolve security vulnerabilities.
+
+### Documentation
+
+- Comprehensive README updates with improved Quick Start section.
+- Updated macOS installation instructions to include dr-cli.
+- Improved usage instructions for `LLM_DEFAULT_MODEL`.
+
 ## [0.2.9] - 2025-12-04
 
 - Bump litellm version to 1.79.3 with retry-after header support for errors 502, 503, 504

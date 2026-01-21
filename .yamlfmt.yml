@@ -4,7 +4,9 @@ continue_on_error: true
 formatter:
   include_document_start: true
   retain_line_breaks: true
+  # Long line length for embedded scripts
   max_line_length: 120
+  trim_trailing_whitespace: true
 gitignore_excludes: true
 exclude:
   - .datarobot/

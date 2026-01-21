@@ -29,10 +29,7 @@ export function getApiUrl() {
 }
 
 export function unwrapMarkdownCodeBlock(message: string): string {
-    return message
-        .replace(/^```(?:markdown)?\s*/, '')
-        .replace(/\s*```$/, '')
-        .replace(/<think>[\s\S]*?<\/think>/g, '');
+    return message.replace(/```(?:markdown)?\s*/g, '\n').replace(/<think>[\s\S]*?<\/think>/g, '');
 }
 
 const DEFAULT_CHAT_NAME = 'New Chat';

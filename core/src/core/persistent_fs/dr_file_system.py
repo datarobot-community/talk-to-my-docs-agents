@@ -50,8 +50,8 @@ logger = logging.getLogger(__name__)
 METADATA_STORAGE_NAME = "fs_metadata"
 TIMESTAMP_STORAGE_NAME = "fs_timestamp"
 
-FILE_API_CONNECT_TIMEOUT = os.environ.get("FILE_API_CONNECT_TIMEOUT", 180)
-FILE_API_READ_TIMEOUT = os.environ.get("FILE_API_READ_TIMEOUT", 180)
+FILE_API_CONNECT_TIMEOUT = float(os.environ.get("FILE_API_CONNECT_TIMEOUT", 180))
+FILE_API_READ_TIMEOUT = float(os.environ.get("FILE_API_READ_TIMEOUT", 180))
 
 
 def _keep_metadata_in_sync(

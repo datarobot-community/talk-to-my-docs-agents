@@ -14,6 +14,7 @@
 import asyncio
 import json
 import logging
+import re
 import uuid as uuidpkg
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, List, Tuple
@@ -84,6 +85,70 @@ def _normalize_model_id(raw_model: str) -> str:
     """
     # fallback to datarobot provider
     return f"datarobot/{raw_model}"
+
+
+def _get_component_name(model: str, config: Config) -> str:
+    """Determine which component is being used."""
+    if model == AGENT_MODEL_NAME:
+        return "AI Agent"
+    if config.llm_deployment_id:
+        return "LLM Blueprint"
+    return "LLM Gateway"
+
+
+def _is_wakeup_error(error_str: str) -> bool:
+    """Check if error indicates a service is waking up from idle."""
+    patterns = [
+        "waiting for workload reach > 0 replicas",
+        "Inference server is unavailable",
+    ]
+    return any(p in error_str for p in patterns)
+
+
+def _extract_json_message(text: str) -> str | None:
+    """Try to extract message/detail from JSON, return None if not JSON or no message."""
+    try:
+        # Handle escaped quotes from upstream
+        unescaped = text.replace(r"\"", '"')
+        data = json.loads(unescaped)
+        msg = data.get("message") or data.get("detail")
+        return str(msg) if msg else None
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return None
+
+
+def _clean_error_message(error_str: str) -> str:
+    """Strip wrapper noise from error message."""
+    msg = error_str
+
+    # Remove litellm exception prefixes and wrappers
+    msg = re.sub(r"litellm\.\w+:\s*", "", msg)
+    msg = re.sub(
+        r"(InternalServerError:\s*)?OpenAIException\s*-\s*(ERROR:\s*)?", "", msg
+    )
+    msg = re.sub(r"DatarobotException\s*-\s*", "", msg)
+
+    # Try to extract message from JSON
+    extracted = _extract_json_message(msg)
+    if extracted:
+        msg = extracted
+
+    # Strip ERROR: prefix
+    msg = re.sub(r"^ERROR:\s*", "", msg)
+
+    # Take first line only (drop tracebacks)
+    return msg.split("\n")[0].strip()
+
+
+def _format_error_message(error: Exception, model: str, config: Config) -> str:
+    """Format error with component name and clean up noise."""
+    component = _get_component_name(model, config)
+    error_str = str(error)
+
+    if _is_wakeup_error(error_str):
+        return f"{component} is waking up. Please retry in a few moments."
+
+    return f"{component}: {_clean_error_message(error_str)}"
 
 
 async def _get_current_user(user_repo: "UserRepository", user_id: int) -> "User":
@@ -264,6 +329,8 @@ async def _update_message_on_exception(
     request: Request,
     message_uuid: uuidpkg.UUID,
     stream_manager: ChatStreamManager,
+    model: str,
+    config: Config,
 ) -> AsyncIterator[None]:
     """
     Context manager for running a chat completions safely
@@ -276,7 +343,8 @@ async def _update_message_on_exception(
     except Exception as e:
         logger.error(f"{type(e).__name__} occurred %s", str(e))
         message_repo: MessageRepository = request.app.state.deps.message_repo
-        update_model = MessageUpdate(in_progress=False, error=str(e))
+        formatted_error = _format_error_message(e, model, config)
+        update_model = MessageUpdate(in_progress=False, error=formatted_error)
         updated_message = await message_repo.update_message(
             uuid=message_uuid,
             update=update_model,
@@ -295,8 +363,12 @@ def _get_safe_completion_task(
     stream_manager: ChatStreamManager,
     auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx),
 ) -> Callable[[], Coroutine[Any, Any, None]]:
+    config: Config = request.app.state.deps.config
+
     async def task() -> None:
-        async with _update_message_on_exception(request, message_uuid, stream_manager):
+        async with _update_message_on_exception(
+            request, message_uuid, stream_manager, model, config
+        ):
             if model == AGENT_MODEL_NAME:
                 await _send_chat_agent_completion(
                     request, message_uuid, stream_manager, auth_ctx
@@ -374,13 +446,20 @@ async def _send_chat_completion(
     config: Config = request.app.state.deps.config
     logger.debug("Sending messages to LLM:\n%s", json.dumps(messages, indent=2))
 
+    if config.llm_deployment_id:
+        api_base = (
+            f"{config.datarobot_endpoint.rstrip('/')}/deployments/"
+            f"{config.llm_deployment_id}/chat/completions"
+        )
+    else:
+        api_base = (
+            f"{config.datarobot_endpoint.rstrip('/')}/genai/llmgw/chat/completions"
+        )
+
     completion = await litellm.acompletion(
         messages=messages,
         model=_normalize_model_id(model),
-        api_base=(
-            f"{config.datarobot_endpoint.rstrip('/')}/deployments/"
-            f"{config.llm_deployment_id}/chat/completions"
-        ),
+        api_base=api_base,
     )
     # Extract message content from LiteLLM response
     llm_message_content = completion["choices"][0]["message"]["content"] or ""

@@ -23,7 +23,7 @@ class Config(DataRobotAppFrameworkBaseSettings):
     datarobot_endpoint: str
     datarobot_api_token: str
 
-    llm_deployment_id: str
+    llm_deployment_id: str | None = None
     use_datarobot_llm_gateway: bool = False
     llm_default_model: str = "custom-model"
     llm_default_model_friendly_name: str = "DataRobot LLM Blueprint"

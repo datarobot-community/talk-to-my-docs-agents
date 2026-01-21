@@ -51,7 +51,9 @@ TEXTGEN_REGISTERED_MODEL_ID = os.environ["TEXTGEN_REGISTERED_MODEL_ID"]
 
 llm_application_name: str = "llm"
 llm_resource_name: str = "[llm]"
-default_model: str = "datarobot-deployed-llm"
+default_model: str = os.environ.get(
+    "LLM_DEFAULT_MODEL", "datarobot/datarobot-deployed-llm"
+)
 
 # Verify the feature flags are available
 validate_feature_flags(REQUIRED_FEATURE_FLAGS)
@@ -83,14 +85,14 @@ proxy_llm_deployment = datarobot.Deployment(
 )
 
 # Use Pulumi apply to verify the registered model LLM once deployed
-proxy_llm_deployment.id.apply(
-    lambda id: verify_llm(model_id=f"datarobot/{default_model}", deployment_id=id)
+proxy_llm_deployment.id.apply(  # type: ignore[missing-argument]
+    lambda id: verify_llm(model_id=f"{default_model}", deployment_id=id)  # type: ignore[invalid-argument-type]
 )
 
 # Make a LLM Blueprint from the deployed registered model
 proxy_llm_validation = datarobot.CustomModelLlmValidation(
     resource_name=f"Talk to My Docs LLM Blueprint Validation [{PROJECT_NAME}]",
-    chat_model_id=default_model,
+    chat_model_id=default_model.removeprefix("datarobot/"),
     deployment_id=proxy_llm_deployment.id,
     use_case_id=use_case.id,
 )
