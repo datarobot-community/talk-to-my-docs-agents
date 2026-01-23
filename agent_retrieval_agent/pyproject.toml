@@ -34,7 +34,6 @@ dependencies = [
     "urllib3>=2.6.3",  # CVE-2025-66418, CVE-2025-66471, CVE-2026-21441
     "langchain-core>=0.3.81,<2.0.0",  # CVE-2025-68664 (CRITICAL), CVE-2025-65106 (HIGH)
     "mcp>=1.23.0",  # CVE-2025-66416
-    "aiohttp>=3.13.3",  # CVE-2025-69223
     # Note: nbconvert 7.16.6 has CVE-2025-53000 (HIGH) - no fix available yet (marked as "affected")
 ]
 

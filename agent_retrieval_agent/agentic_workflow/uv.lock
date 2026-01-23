@@ -41,7 +41,6 @@ name = "agent-retrieval-agent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "authlib" },
     { name = "datarobot", extra = ["auth-authlib", "core"] },
@@ -111,7 +110,6 @@ extras = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = ">=3.13.3" },
     { name = "aiosqlite", specifier = ">=0.21.0,<0.22" },
     { name = "authlib", specifier = ">=1.6.5" },
     { name = "chainlit", marker = "extra == 'chainlit'", specifier = ">=2.9.0" },
