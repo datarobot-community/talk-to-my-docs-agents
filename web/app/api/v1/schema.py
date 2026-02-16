@@ -21,6 +21,7 @@ class ErrorCodes(str, Enum):
     NOT_AUTHED = "auth:not_authenticated"
     INVALID_OAUTH_STATE = "auth:invalid_state"
     NOT_AUTHORIZED = "auth:not_authorized"
+    OAUTH_REAUTH_REQUIRED = "auth:oauth_reauth_required"
     IDENTITY_NOT_FOUND = "identity:not_found"
     DATAROBOT_USER_ERROR = "identity:datarobot_user_error"
 

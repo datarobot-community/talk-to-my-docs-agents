@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Edit, Trash2, FileText, Calendar } from 'lucide-react';
+import { Edit, Trash2, FileText, Calendar, EllipsisVertical } from 'lucide-react';
 
 import noBasesPreview from '@/assets/no_bases_preview.svg';
+import noBasesPreviewLight from '@/assets/no_bases_preview_light.svg';
 import { Button } from '@/components/ui/button.tsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ROUTES } from './routes';
@@ -17,24 +18,39 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardAction,
+    CardContent,
+    CardFooter,
+} from '@/components/ui/card';
+import { Heading } from '@/components/ui/heading';
+import { useTheme } from '@/theme/theme-provider';
+import { useTranslation } from '@/lib/i18n';
 
 export const KnowledgeBases = () => {
+    const { t } = useTranslation();
     const navigate = useNavigate();
     const { data: knowledgeBase = [], isLoading, error } = useListKnowledgeBases();
     const deleteBaseMutation = useDeleteKnowledgeBase();
     const [deletingBaseId, setDeletingBaseId] = useState<string | null>(null);
-
+    const { theme } = useTheme();
     const handleDeleteBase = async (baseUuid: string) => {
         if (
             confirm(
-                'Are you sure you want to delete this knowledge base? This action cannot be undone.'
+                t(
+                    'Are you sure you want to delete this knowledge base? This action cannot be undone.'
+                )
             )
         ) {
             setDeletingBaseId(baseUuid);
             try {
                 await deleteBaseMutation.mutateAsync(baseUuid);
             } catch (error) {
-                console.error('Failed to delete base:', error);
+                console.error(t('Failed to delete base:'), error);
             } finally {
                 setDeletingBaseId(null);
             }
@@ -51,10 +67,10 @@ export const KnowledgeBases = () => {
 
     if (isLoading) {
         return (
-            <div className="flex justify-center items-center max-h-screen p-6">
+            <div className="flex max-h-screen items-center justify-center p-6">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
-                    <p className="text-gray-500">Loading knowledge bases...</p>
+                    <div className="mx-auto mb-4 size-8 animate-spin rounded-full border-b-2"></div>
+                    <p className="body-secondary">Loading knowledge bases...</p>
                 </div>
             </div>
         );
@@ -62,10 +78,10 @@ export const KnowledgeBases = () => {
 
     if (error) {
         return (
-            <div className="flex justify-center items-center max-h-screen p-6">
+            <div className="flex max-h-screen items-center justify-center p-6">
                 <div className="text-center">
-                    <p className="text-red-500 mb-4">Failed to load knowledge bases</p>
-                    <Button onClick={() => window.location.reload()}>Retry</Button>
+                    <p className="mb-4 text-destructive">{t('Failed to load knowledge bases')}</p>
+                    <Button onClick={() => window.location.reload()}>{t('Retry')}</Button>
                 </div>
             </div>
         );
@@ -73,27 +89,31 @@ export const KnowledgeBases = () => {
 
     if (knowledgeBase.length === 0) {
         return (
-            <div data-testid="knowledge-empty-state" className="flex justify-center max-h-screen">
-                <div className="p-6 pt-48 max-w-2xl w-full items-center flex-col justify-center flex max-h-screen">
+            <div data-testid="knowledge-empty-state" className="flex max-h-screen justify-center">
+                <div className="flex max-h-screen w-full max-w-2xl flex-col items-center justify-center p-6 pt-48">
                     <img
-                        src={noBasesPreview}
+                        src={theme === 'light' ? noBasesPreviewLight : noBasesPreview}
                         alt="No knowledge bases yet"
-                        className="w-48 h-48 mx-auto mb-4"
+                        className="mx-auto mb-4 size-48"
                     />
-                    <h2 className="text-xl font-semibold mb-4">No knowledge bases yet</h2>
-                    <p className="text-gray-500">
-                        Create a knowledge base to group documents by topic, team, or use case.
+                    <h2 className="mb-4 text-xl font-semibold">{t('No knowledge bases yet')}</h2>
+                    <p className="body-secondary">
+                        {t(
+                            'Create a knowledge base to group documents by topic, team, or use case.'
+                        )}
                     </p>
-                    <p className="text-gray-500 mb-6">
-                        Once uploaded, you can search, summarize, and chat with them using AI.
+                    <p className="mb-6 body-secondary">
+                        {t(
+                            'Once uploaded, you can search, summarize, and chat with them using AI.'
+                        )}
                     </p>
 
                     <Button
                         data-testid="create-knowledge-base-button"
                         onClick={() => navigate(ROUTES.ADD_KNOWLEDGE_BASE)}
-                        className="h-9 flex cursor-pointer"
+                        className="flex h-9 cursor-pointer"
                     >
-                        Create knowledge base
+                        {t('Create knowledge base')}
                     </Button>
                 </div>
             </div>
@@ -101,141 +121,142 @@ export const KnowledgeBases = () => {
     }
 
     return (
-        <div className="p-6 max-w-6xl mx-auto">
-            <div className="flex justify-between items-center mb-6">
+        <div className="mx-auto w-full max-w-6xl p-6">
+            <div className="mb-6 flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Knowledge Bases</h1>
-                    <p className="text-gray-400 mt-1">
-                        Manage your document collections and upload files to knowledge bases
+                    <Heading level={2}>{t('Knowledge Bases')}</Heading>
+                    <p className="body-secondary">
+                        {t('Manage your document collections and upload files to knowledge bases')}
                     </p>
                 </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {knowledgeBase.map((base: KnowledgeBaseSchema) => (
-                    <div
-                        data-testid="knowledge-base-card"
-                        key={base.uuid}
-                        className="border border-gray-700 rounded-lg p-6 hover:shadow-lg transition-shadow bg-card hover:bg-gray-750 flex flex-col h-full"
-                    >
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex-1">
-                                <TooltipProvider>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <h3
-                                                data-testid="knowledge-base-title"
-                                                className="font-semibold text-lg mb-2 line-clamp-2 text-white wrap-anywhere"
-                                            >
-                                                {base.title}
-                                            </h3>
-                                        </TooltipTrigger>
-                                        <TooltipContent className="max-w-xs whitespace-normal break-words">
-                                            <p>{base.title}</p>
-                                        </TooltipContent>
-                                    </Tooltip>
-                                </TooltipProvider>
-                                <TooltipProvider>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <p
-                                                data-testid="knowledge-base-description"
-                                                className="text-gray-300 text-sm line-clamp-3 mb-3 wrap-anywhere"
-                                            >
-                                                {base.description}
-                                            </p>
-                                        </TooltipTrigger>
-                                        <TooltipContent className="max-w-xs whitespace-normal break-words">
+                    <Card data-testid="knowledge-base-card" className="h-full" key={base.uuid}>
+                        <CardHeader>
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <CardTitle
+                                            data-testid="knowledge-base-title"
+                                            className="line-clamp-2 wrap-anywhere"
+                                        >
+                                            {base.title}
+                                        </CardTitle>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs wrap-break-word whitespace-normal">
+                                        <p>{base.title}</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <CardDescription
+                                            data-testid="knowledge-base-description"
+                                            className="line-clamp-3 wrap-anywhere"
+                                        >
                                             {base.description}
-                                        </TooltipContent>
-                                    </Tooltip>
-                                </TooltipProvider>
-                            </div>
-                            <DropdownMenu>
-                                <TooltipProvider>
-                                    <Tooltip>
-                                        <TooltipTrigger>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button
-                                                    disabled={!base.can_edit}
-                                                    data-testid="knowledge-base-menu-button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-8 w-8 p-0 text-gray-400 hover:text-white hover:bg-gray-700"
-                                                >
-                                                    <span className="sr-only">Open menu</span>
-                                                    <svg
-                                                        className="h-4 w-4"
-                                                        fill="currentColor"
-                                                        viewBox="0 0 20 20"
+                                        </CardDescription>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs wrap-break-word whitespace-normal">
+                                        {base.description}
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                            <CardAction>
+                                <DropdownMenu>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        disabled={!base.can_edit}
+                                                        data-testid="knowledge-base-menu-button"
+                                                        variant="ghost"
+                                                        size="sm"
                                                     >
-                                                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                                                    </svg>
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                        </TooltipTrigger>
-                                        {!base.can_edit && (
-                                            <TooltipContent className="max-w-xs whitespace-normal break-words">
-                                                This knowledge base is public and cannot be edited.
-                                            </TooltipContent>
-                                        )}
-                                    </Tooltip>
-                                </TooltipProvider>
-                                <DropdownMenuContent
-                                    align="end"
-                                    className="bg-gray-800 border-gray-700"
-                                >
-                                    <DropdownMenuItem
-                                        data-testid="knowledge-base-edit-button"
-                                        onClick={() =>
-                                            navigate(`${ROUTES.EDIT_KNOWLEDGE_BASE}/${base.uuid}`)
-                                        }
-                                        className="cursor-pointer text-gray-300 hover:text-white hover:bg-gray-700"
-                                    >
-                                        <Edit className="h-4 w-4 mr-2" />
-                                        Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        data-testid="knowledge-base-delete-button"
-                                        onClick={() => handleDeleteBase(base.uuid)}
-                                        className="cursor-pointer text-red-400 hover:text-red-300 hover:bg-gray-700"
-                                        disabled={deletingBaseId === base.uuid}
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        {deletingBaseId === base.uuid ? 'Deleting...' : 'Delete'}
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </div>
+                                                        <span className="sr-only">
+                                                            {t('Open menu')}
+                                                        </span>
+                                                        <EllipsisVertical />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                            </TooltipTrigger>
+                                            {!base.can_edit && (
+                                                <TooltipContent className="max-w-xs wrap-break-word whitespace-normal">
+                                                    {t(
+                                                        'This knowledge base is public and cannot be edited.'
+                                                    )}
+                                                </TooltipContent>
+                                            )}
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                    <DropdownMenuContent>
+                                        <DropdownMenuItem
+                                            data-testid="knowledge-base-edit-button"
+                                            onClick={() =>
+                                                navigate(
+                                                    `${ROUTES.EDIT_KNOWLEDGE_BASE}/${base.uuid}`
+                                                )
+                                            }
+                                        >
+                                            <Edit />
+                                            {t('Edit')}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                            data-testid="knowledge-base-delete-button"
+                                            onClick={() => handleDeleteBase(base.uuid)}
+                                            variant="destructive"
+                                            disabled={deletingBaseId === base.uuid}
+                                        >
+                                            <Trash2 />
+                                            {deletingBaseId === base.uuid
+                                                ? t('Deleting...')
+                                                : t('Delete')}
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </CardAction>
+                        </CardHeader>
 
-                        <div className="space-y-2 text-sm text-gray-400 flex-grow">
+                        <CardContent className="space-y-2 mn-label">
                             <div className="flex items-center gap-2">
-                                <FileText className="h-4 w-4" />
+                                <FileText className="size-4" />
                                 <span data-testid="knowledge-base-file-count">
-                                    {base.files.length} file{base.files.length !== 1 ? 's' : ''} •{' '}
-                                    {base.token_count.toLocaleString()} tokens
+                                    {' '}
+                                    {t('{{files}} file • {{tokens}} tokens', {
+                                        files: base.files.length,
+                                        tokens: base.token_count.toLocaleString(),
+                                        count: base.files.length,
+                                        plural: '{{files}} files • {{tokens}} tokens',
+                                    })}
                                 </span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <Calendar className="h-4 w-4" />
-                                <span>Created {formatDate(base.created_at)}</span>
+                                <Calendar className="size-4" />
+                                <span>
+                                    {t('Created {{date}}', { date: formatDate(base.created_at) })}
+                                </span>
                             </div>
-                        </div>
+                        </CardContent>
+
                         {base.can_edit && (
-                            <div className="mt-4 pt-4 border-t border-gray-700">
+                            <CardFooter>
                                 <Button
-                                    variant="outline"
+                                    variant="secondary"
                                     size="sm"
-                                    className="w-full border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 hover:border-gray-500"
+                                    className="w-full"
                                     onClick={() =>
                                         navigate(`${ROUTES.MANAGE_KNOWLEDGE_BASE}/${base.uuid}`)
                                     }
                                 >
-                                    Manage Files
+                                    {t('Manage Files')}
                                 </Button>
-                            </div>
+                            </CardFooter>
                         )}
-                    </div>
+                    </Card>
                 ))}
             </div>
         </div>

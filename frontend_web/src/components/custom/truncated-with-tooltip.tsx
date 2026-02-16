@@ -14,7 +14,7 @@ export function TruncatedWithTooltip({
                 <TooltipTrigger asChild>
                     <p className={cn('truncate', triggerClasses)}>{text}</p>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-xs whitespace-normal break-words">
+                <TooltipContent className="max-w-xs wrap-break-word whitespace-normal">
                     <p>{text}</p>
                 </TooltipContent>
             </Tooltip>

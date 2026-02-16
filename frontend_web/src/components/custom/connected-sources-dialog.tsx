@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Heading } from '@/components/ui/heading';
 import {
     CloudUpload,
     FileIcon,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
+import { useTranslation } from '@/lib/i18n';
 
 interface ConnectedSourcesDialogProps {
     onFileSelect: (file: ExternalFile, source: 'google' | 'box') => void;
@@ -36,6 +38,7 @@ export function ConnectedSourcesDialog({
     onOpenChange,
     isUploading = false,
 }: ConnectedSourcesDialogProps) {
+    const { t } = useTranslation();
     const { connectedSources, hasConnectedSources } = useConnectedSources();
     const [selectedGoogleFolder, setSelectedGoogleFolder] = useState<string | undefined>();
     const [selectedBoxFolder, setSelectedBoxFolder] = useState<string>('0');
@@ -101,18 +104,26 @@ export function ConnectedSourcesDialog({
                     typeof axiosError.response.data === 'object' &&
                     'detail' in axiosError.response.data
                 ) {
-                    return axiosError.response.data.detail as string;
+                    const detail = (axiosError.response.data as { detail: unknown }).detail;
+                    // Handle ErrorSchema structure: { code: string, message: string }
+                    if (typeof detail === 'object' && detail && 'message' in detail) {
+                        return (detail as { message: string }).message;
+                    }
+                    // Handle plain string detail
+                    if (typeof detail === 'string') {
+                        return detail;
+                    }
                 }
-                return 'Authentication failed. Please reconnect your account.';
+                return t('Authentication failed. Please reconnect your account.');
             }
 
             // Handle authorization errors
             if (axiosError.response?.status === 403) {
-                return 'Access denied. Please check your account permissions.';
+                return t('Access denied. Please check your account permissions.');
             }
         }
 
-        return 'Unable to connect. Please try again or reconnect your account.';
+        return t('Unable to connect. Please try again or reconnect your account.');
     };
 
     // Helper function to determine if we should show retry vs reconnect
@@ -137,33 +148,34 @@ export function ConnectedSourcesDialog({
             const needsReconnect = shouldShowReconnect(error);
 
             return (
-                <div className="p-4 space-y-4">
+                <div className="space-y-4 p-4">
                     <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
+                        <AlertCircle className="size-4" />
                         <AlertDescription>
                             <div>
-                                <p className="font-medium">
-                                    Unable to connect to{' '}
-                                    {source === 'google' ? 'Google Drive' : 'Box'}
+                                <p className="mn-label">
+                                    {t('Unable to connect to {{source}}', {
+                                        source: source === 'google' ? 'Google Drive' : 'Box',
+                                    })}
                                 </p>
-                                <p className="text-sm mt-1">{errorMessage}</p>
+                                <p className="mt-1 body">{errorMessage}</p>
                             </div>
                         </AlertDescription>
                     </Alert>
                     <div className="flex justify-center">
                         {needsReconnect ? (
-                            <Button onClick={goToSettings} variant="outline" size="sm">
-                                Reconnect Account
+                            <Button onClick={goToSettings} variant="secondary" size="sm">
+                                {t('Reconnect Account')}
                             </Button>
                         ) : (
                             <Button
                                 onClick={refetch}
-                                variant="outline"
+                                variant="secondary"
                                 size="sm"
                                 className="flex items-center gap-2"
                             >
-                                <RefreshCw className="w-3 h-3" />
-                                Try Again
+                                <RefreshCw className="size-3" />
+                                {t('Try Again')}
                             </Button>
                         )}
                     </div>
@@ -172,11 +184,11 @@ export function ConnectedSourcesDialog({
         }
 
         if (isLoading) {
-            return <div className="p-4 text-center text-gray-500">Loading files...</div>;
+            return <div className="body-secondary p-4 text-center">{t('Loading files...')}</div>;
         }
 
         if (!files || files.length === 0) {
-            return <div className="p-4 text-center text-gray-500">No files found</div>;
+            return <div className="body-secondary p-4 text-center">{t('No files found')}</div>;
         }
 
         const searchQuery = source === 'google' ? googleSearchQuery : boxSearchQuery;
@@ -188,13 +200,13 @@ export function ConnectedSourcesDialog({
         );
 
         return (
-            <div className="flex flex-col h-full">
+            <div className="flex h-full flex-col gap-2 p-2">
                 {/* Search Box */}
-                <div className="p-2 border-b flex-shrink-0">
+                <div className="shrink-0">
                     <div className="relative">
-                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground select-none" />
                         <Input
-                            placeholder={`Search ${source} files...`}
+                            placeholder={t('Search {{source}} files...', { source })}
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             className="pl-8"
@@ -203,29 +215,38 @@ export function ConnectedSourcesDialog({
                 </div>
 
                 {/* File Count */}
-                <div className="text-sm text-gray-600 p-2 border-b bg-gray-50 flex-shrink-0">
+                <div className="shrink-0 border-b body-secondary py-2">
                     {searchQuery ? (
                         <>
-                            Showing {filteredFiles.length} of {files.length} items
+                            {t('Showing {{filtered}} of {{total}} items', {
+                                filtered: filteredFiles.length,
+                                total: files.length,
+                            })}
                         </>
                     ) : (
-                        <>Showing {files.length} items</>
+                        <>
+                            {t('Showing {{total}} items', {
+                                total: files.length,
+                            })}
+                        </>
                     )}
                 </div>
 
                 {/* File List */}
                 <div className="flex-1 overflow-hidden">
                     <ScrollArea className="h-full" type="always">
-                        <div className="p-2">
+                        <div>
                             {filteredFiles.length === 0 ? (
-                                <div className="p-4 text-center text-gray-500">
-                                    No files match "{searchQuery}"
+                                <div className="body-secondary p-4 text-center">
+                                    {t('No files match "{{query}}"', {
+                                        query: searchQuery,
+                                    })}
                                 </div>
                             ) : (
                                 filteredFiles.map(file => (
                                     <div
                                         key={file.id}
-                                        className={`flex items-center gap-3 p-3 hover:bg-gray-600 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                                        className={`flex cursor-pointer items-center gap-3 border-b p-3 last:border-b-0 hover:bg-secondary ${
                                             isUploading ? 'opacity-50' : ''
                                         }`}
                                         onClick={() =>
@@ -233,21 +254,19 @@ export function ConnectedSourcesDialog({
                                         }
                                     >
                                         {file.type === 'folder' ? (
-                                            <FolderIcon className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                                            <FolderIcon className="size-4 shrink-0 text-link" />
                                         ) : file.type === 'web_link' ? (
-                                            <ExternalLink className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                            <ExternalLink className="size-4 shrink-0 text-success" />
                                         ) : (
-                                            <FileIcon className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                            <FileIcon className="size-4 shrink-0 text-muted-foreground" />
                                         )}
-                                        <span className="flex-1 text-sm truncate">{file.name}</span>
-                                        <span className="text-xs text-gray-400 flex-shrink-0">
-                                            {file.type}
-                                        </span>
+                                        <span className="flex-1 truncate body">{file.name}</span>
+                                        <span className="shrink-0 caption-01">{file.type}</span>
                                         {isUploading && (
                                             <div className="flex items-center gap-1">
-                                                <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                                                <span className="text-xs text-blue-500">
-                                                    Uploading...
+                                                <div className="size-3 animate-spin rounded-full border-2 border-link border-t-transparent" />
+                                                <span className="caption-01 text-link">
+                                                    {t('Uploading...')}
                                                 </span>
                                             </div>
                                         )}
@@ -263,44 +282,43 @@ export function ConnectedSourcesDialog({
 
     return (
         <Sheet open={open} onOpenChange={handleDialogClose}>
-            <SheetContent className="w-[400px] sm:w-[540px]">
+            <SheetContent className="w-[400px] shrink p-2 sm:w-[540px]">
                 <SheetHeader>
                     <SheetTitle className="flex items-center gap-2">
-                        <CloudUpload className="w-5 h-5" />
-                        Upload from Connected Source
+                        <CloudUpload className="size-5" />
+                        {t('Upload from Connected Source')}
                         {isUploading && (
-                            <div className="flex items-center gap-2 ml-2">
-                                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                                <span className="text-sm text-blue-500">Uploading...</span>
+                            <div className="ml-2 flex items-center gap-2">
+                                <div className="size-4 animate-spin rounded-full border-2 border-link border-t-transparent" />
+                                <span className="body text-link">{t('Uploading...')} </span>
                             </div>
                         )}
                     </SheetTitle>
                 </SheetHeader>
 
                 {!hasConnectedSources ? (
-                    <div className="flex flex-col items-center justify-center py-8 space-y-4">
-                        <CloudUpload className="w-12 h-12 text-gray-400" />
+                    <div className="flex flex-col items-center justify-center space-y-4 py-8">
+                        <CloudUpload className="size-12 text-muted-foreground" />
                         <div className="text-center">
-                            <h3 className="text-lg font-medium text-gray-900">
-                                No Connected Sources
-                            </h3>
-                            <p className="text-sm text-gray-500 mt-1">
-                                Connect to Google Drive or Box to upload files from your cloud
-                                storage.
+                            <Heading level={3}>{t('No Connected Sources')}</Heading>
+                            <p className="mt-1 body-secondary">
+                                {t(
+                                    'Connect to Google Drive or Box to upload files from your cloud storage.'
+                                )}
                             </p>
                         </div>
                         <Button onClick={goToSettings} className="mt-4">
-                            Connect Sources
+                            {t('Connect Sources')}
                         </Button>
                     </div>
                 ) : (
-                    <div className="mt-6 flex flex-col h-[calc(100vh-200px)]">
+                    <div className="flex grow flex-col overflow-y-scroll">
                         <Tabs
                             defaultValue={connectedSources[0]?.type}
-                            className="w-full flex flex-col h-full"
+                            className="flex size-full flex-col"
                         >
                             <TabsList
-                                className={`grid w-full ${connectedSources.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} flex-shrink-0`}
+                                className={`grid w-full ${connectedSources.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} shrink-0`}
                             >
                                 {connectedSources.map(source => (
                                     <TabsTrigger key={source.id} value={source.type}>
@@ -313,39 +331,39 @@ export function ConnectedSourcesDialog({
                                 <TabsContent
                                     key={source.id}
                                     value={source.type}
-                                    className="mt-4 flex-1 flex flex-col overflow-hidden"
+                                    className="mt-4 flex flex-1 flex-col overflow-hidden"
                                 >
-                                    <div className="flex flex-col h-full">
+                                    <div className="flex h-full flex-col">
                                         {/* Back button */}
-                                        <div className="flex-shrink-0 mb-2">
+                                        <div className="mb-2 shrink-0">
                                             {source.type === 'google' && selectedGoogleFolder && (
                                                 <Button
-                                                    variant="outline"
+                                                    variant="secondary"
                                                     size="sm"
                                                     onClick={() => {
                                                         setSelectedGoogleFolder(undefined);
                                                         setGoogleSearchQuery('');
                                                     }}
                                                 >
-                                                    ← Back to root
+                                                    {t('← Back to root')}
                                                 </Button>
                                             )}
                                             {source.type === 'box' && selectedBoxFolder !== '0' && (
                                                 <Button
-                                                    variant="outline"
+                                                    variant="secondary"
                                                     size="sm"
                                                     onClick={() => {
                                                         setSelectedBoxFolder('0');
                                                         setBoxSearchQuery('');
                                                     }}
                                                 >
-                                                    ← Back to root
+                                                    {t('← Back to root')}
                                                 </Button>
                                             )}
                                         </div>
 
                                         {/* File list - takes remaining height */}
-                                        <div className="flex-1 border rounded-md overflow-hidden min-h-0">
+                                        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
                                             {source.type === 'google' &&
                                                 renderFileList(
                                                     googleFiles?.files,

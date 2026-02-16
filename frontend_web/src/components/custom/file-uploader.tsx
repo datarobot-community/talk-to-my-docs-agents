@@ -11,6 +11,7 @@ import { FileSchema, useFileUploadMutation } from '@/api/knowledge-bases/hooks';
 import { getApiErrorMessage } from '@/api/utils';
 import { FileActionMenu } from '@/components/custom/file-action-menu.tsx';
 import { formatFileSize } from '@/lib/utils';
+import { useTranslation } from '@/lib/i18n';
 
 interface FileUploaderProps {
     maxSize?: number;
@@ -38,6 +39,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     onDeleteFile,
     existingFiles = [],
 }) => {
+    const { t } = useTranslation();
     const [files, setFiles] = useState<File[]>([]);
     const [filesToRemove, setFilesToRemove] = useState<FileSchema | undefined>();
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -49,7 +51,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     } = useFileUploadMutation({
         baseUuid,
         onSuccess: () => {
-            toast.success('Files uploaded successfully');
+            toast.success(t('Files uploaded successfully'));
             setFiles([]);
             onFilesChange([]);
             if (onUploadComplete) {
@@ -57,7 +59,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
             }
         },
         onError: error => {
-            toast.error(getApiErrorMessage(error, 'Upload failed'));
+            toast.error(getApiErrorMessage(error, t('Upload failed')));
         },
     });
 
@@ -76,7 +78,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
 
             if (rejectedFiles.length > 0) {
                 rejectedFiles.forEach(({ file }) => {
-                    console.error(`File ${file.name} was rejected`);
+                    console.error(t('File {{name}} was rejected', { name: file.name }));
                 });
             }
         },
@@ -125,11 +127,11 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                         onClick={event => {
                             event.stopPropagation();
                         }}
-                        className="border border-dashed border-primary/20 p-4 rounded-lg w-full min-h-[300px] mt-6"
+                        className="mt-6 min-h-[300px] w-full rounded-lg border border-dashed p-4"
                     >
                         <input data-testid="file-input" {...getInputProps()} />
-                        <div className="flex justify-between items-center">
-                            <h3 className="text-sm font-medium">Upload Files</h3>
+                        <div className="flex items-center justify-between">
+                            <span className="heading-04">{t('Upload Files')}</span>
                             <Button
                                 data-testid="add-files-button"
                                 {...getRootProps()}
@@ -138,83 +140,96 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                                 size="sm"
                                 disabled={isUploading}
                             >
-                                <Plus className="h-4 w-4 mr-2" />
-                                Add files
+                                <Plus className="mr-2 size-4" />
+                                {t('Add files')}
                             </Button>
                         </div>
 
                         {currentProgress !== 100 && currentProgress !== 0 && (
-                            <Progress value={currentProgress} className="h-2 mt-4" />
+                            <Progress value={currentProgress} className="mt-4 h-2" />
                         )}
-                        <ScrollArea className="w-full max-h-[calc(100vh-400px)] min-h-[360px] overflow-y-scroll  scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-300 mt-4 border-t border-primary/10">
-                            {!files.length && !existingFiles.length && (
-                                <p className="text-center p-6 text-sm text-gray-400">
-                                    <img
-                                        src={fileUpload}
-                                        alt="File Upload"
-                                        className="w-16 h-16 mx-auto mb-4"
-                                    />
-                                    Drag and drop documents here. Supported formats: TXT, PDF, DOCX,
-                                    MD, PPTX, CSV.
-                                </p>
-                            )}
-                            {files.length > 0 && (
-                                <div className="border-b border-gray-100 pb-4">
-                                    {/* New files to upload */}
-                                    {files.map((file, index) => (
-                                        <div
-                                            key={`new-${index}`}
-                                            className="group flex items-center pt-4 gap-4 pr-4 w-full"
-                                        >
-                                            <div className="flex justify-center items-center w-8">
-                                                <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-sm font-normal leading-tight truncate">
-                                                    {file.name}
+                        <ScrollArea className="mt-4 scrollbar-thin w-full border-t border-primary/10">
+                            <div className="max-h-[calc(100vh-400px)] min-h-[360px]">
+                                {!files.length && !existingFiles.length && (
+                                    <p className="body-secondary p-6 text-center">
+                                        <img
+                                            src={fileUpload}
+                                            alt={t('File Upload')}
+                                            className="mx-auto mb-4 size-16"
+                                        />
+                                        {t(
+                                            'Drag and drop documents here. Supported formats: TXT, PDF, DOCX, MD, PPTX, CSV.'
+                                        )}
+                                    </p>
+                                )}
+                                {files.length > 0 && (
+                                    <div className="border-b border-secondary-foreground pb-4">
+                                        {/* New files to upload */}
+                                        {files.map((file, index) => (
+                                            <div
+                                                key={`new-${index}`}
+                                                className="group flex w-full items-center gap-4 pt-4 pr-4"
+                                            >
+                                                <div className="flex w-8 items-center justify-center">
+                                                    <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
                                                 </div>
-                                                <div className="text-xs text-gray-400 leading-tight truncate">
-                                                    File size: {formatFileSize(file?.size || 0)}
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="truncate body leading-tight">
+                                                        {file.name}
+                                                    </div>
+                                                    <div className="truncate caption-01 leading-tight">
+                                                        {t('File size: {{size}}', {
+                                                            size: formatFileSize(file?.size || 0),
+                                                        })}
+                                                    </div>
+                                                </div>
+                                                <div className="ml-2 flex items-center">
+                                                    <XIcon
+                                                        className="size-4 cursor-pointer text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                                                        onClick={event => {
+                                                            event.stopPropagation();
+                                                            onRemove(index);
+                                                        }}
+                                                    />
                                                 </div>
                                             </div>
-                                            <div className="flex items-center ml-2">
-                                                <XIcon
-                                                    className="w-4 h-4 cursor-pointer text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                                                    onClick={event => {
-                                                        event.stopPropagation();
-                                                        onRemove(index);
-                                                    }}
-                                                />
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Existing files */}
-                            {existingFiles.map((file, index) => {
-                                return (
-                                    <div
-                                        key={`existing-${index}`}
-                                        className="group flex items-center pt-4 gap-4 w-full border-gray-100 pb-4 pr-1"
-                                    >
-                                        <div className="flex justify-center items-center w-8">
-                                            <FileChartColumnIncreasing className="w-6 text-blue-500" />
-                                        </div>
-                                        <div className="flex-1 w-0">
-                                            <div className="text-sm font-normal leading-tight truncate">
-                                                {file.filename}
-                                            </div>
-                                            <div className="text-xs text-gray-400 leading-tight truncate">
-                                                Added: {new Date(file.added).toLocaleDateString()}
-                                                {file.size_bytes &&
-                                                    ` • ${formatFileSize(file?.size_bytes || 0)}`}
-                                            </div>
-                                        </div>
-                                        <FileActionMenu file={file} onDelete={setFilesToRemove} />
+                                        ))}
                                     </div>
-                                );
-                            })}
+                                )}
+
+                                {/* Existing files */}
+                                {existingFiles.map((file, index) => {
+                                    return (
+                                        <div
+                                            key={`existing-${index}`}
+                                            className="group flex w-full items-center gap-4 border-secondary-foreground py-4 pr-1"
+                                        >
+                                            <div className="flex w-8 items-center justify-center">
+                                                <FileChartColumnIncreasing className="w-6 text-link" />
+                                            </div>
+                                            <div className="w-0 flex-1">
+                                                <div className="truncate body leading-tight">
+                                                    {file.filename}
+                                                </div>
+                                                <div className="truncate caption-01 leading-tight">
+                                                    {t('Added: {{date}}{{size}}', {
+                                                        date: new Date(
+                                                            file.added
+                                                        ).toLocaleDateString(),
+                                                        size: file.size_bytes
+                                                            ? ` • ${formatFileSize(file?.size_bytes || 0)}`
+                                                            : '',
+                                                    })}
+                                                </div>
+                                            </div>
+                                            <FileActionMenu
+                                                file={file}
+                                                onDelete={setFilesToRemove}
+                                            />
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </ScrollArea>
                     </div>
                 )}
@@ -223,14 +238,14 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
             {files.length > 0 && (
                 <div className="mt-4 flex justify-end gap-2">
                     <Button
-                        variant="outline"
+                        variant="secondary"
                         onClick={() => {
                             setFiles([]);
                             onFilesChange([]);
                         }}
                         disabled={isUploading}
                     >
-                        Clear
+                        {t('Clear')}
                     </Button>
                     <Button
                         data-testid="upload-button"
@@ -239,15 +254,18 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                     >
                         {isUploading
                             ? currentProgress === 100
-                                ? 'Saving...'
-                                : 'Uploading...'
-                            : `Upload ${files.length} file${files.length > 1 ? 's' : ''}`}
+                                ? t('Saving...')
+                                : t('Uploading...')
+                            : t('Upload {{count}} file', {
+                                  count: files.length,
+                                  plural: 'Upload {{count}} files',
+                              })}
                     </Button>
                 </div>
             )}
             <ConfirmDialog
                 open={Boolean(filesToRemove)}
-                confirmButtonText="Delete"
+                confirmButtonText={t('Delete')}
                 onOpenChange={open => {
                     if (!open) {
                         if (isConfirmingDelete) {
@@ -256,12 +274,14 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                         setFilesToRemove(undefined);
                     }
                 }}
-                title={`Delete File: ${filesToRemove?.filename || ''}`}
+                title={t('Delete File: {{filename}}', {
+                    filename: filesToRemove?.filename || '',
+                })}
                 confirmLoading={isConfirmingDelete}
-                confirmLoadingText="Deleting..."
+                confirmLoadingText={t('Deleting...')}
                 onConfirm={handleConfirmDelete}
             >
-                <div>Are you sure you want to delete this file?</div>
+                <div>{t('Are you sure you want to delete this file?')}</div>
             </ConfirmDialog>
         </div>
     );

@@ -37,10 +37,7 @@ tasks:
     cmds:
       - echo "🛠️  Running migrations.."
       - uv run python alembic_migration.py
-  dev:
-    silent: true
-    desc: "🔨 Run the development server"
-  dev:
+  dev-remote-agent:
     silent: true
     desc: "🔨 Run the development server"
     env:
@@ -52,7 +49,7 @@ tasks:
     cmds:
       - echo "🔨 Starting development server"
       - PYTHONPATH="$CALCULATED_PYTHONPATH" uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
-  dev-agent:
+  dev:
     silent: true
     desc: "🔨 Run the development server with the local agent server"
     env:

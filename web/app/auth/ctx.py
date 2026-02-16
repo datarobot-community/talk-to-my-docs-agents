@@ -14,6 +14,7 @@
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable, Final
 
+from datarobot.auth.datarobot.exceptions import OAuthServiceError
 from datarobot.auth.oauth import OAuthToken, Profile
 from datarobot.auth.session import AuthCtx
 from datarobot.auth.typing import Metadata
@@ -243,7 +244,8 @@ def get_access_token(
                 identity
                 for identity in auth_ctx.identities
                 if identity.provider_type == provider_id.value
-            )
+            ),
+            None,
         )
 
         if not identity:
@@ -255,6 +257,23 @@ def get_access_token(
                 status_code=status.HTTP_409_CONFLICT, detail=err.model_dump()
             )
 
-        return await oauth_tokens.get_access_token(identity)
+        try:
+            return await oauth_tokens.get_access_token(identity)
+        except OAuthServiceError as e:
+            logger.warning(
+                "OAuth token refresh failed - user may need to re-authorize",
+                extra={
+                    "provider_id": provider_id.value,
+                    "identity_id": identity.id,
+                    "error": str(e),
+                },
+            )
+            err = ErrorSchema(
+                code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+                message=f"Your {provider_id.value.replace('_', ' ').title()} connection has expired or been revoked. Please reconnect your account in Settings.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+            )
 
     return _get_access_token

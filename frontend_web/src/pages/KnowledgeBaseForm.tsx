@@ -14,12 +14,15 @@ import {
     KnowledgeBaseUpdateRequest,
     useFileDelete,
 } from '@/api/knowledge-bases/hooks';
+import { Spinner } from '@/components/ui/spinner';
+import { Heading } from '@/components/ui/heading';
+import { useTranslation } from '@/lib/i18n';
 
 export const KnowledgeBaseFormPage = () => {
     const { baseUuid } = useParams<{ baseUuid: string }>();
     const location = useLocation();
     const navigate = useNavigate();
-
+    const { t } = useTranslation();
     // Determine the mode based on the current path
     const isEditing = location.pathname.includes('/edit');
     const isManaging = location.pathname.includes('/manage');
@@ -80,7 +83,7 @@ export const KnowledgeBaseFormPage = () => {
                 navigate(`${ROUTES.MANAGE_KNOWLEDGE_BASE}/${newBase.uuid}`);
             }
         } catch (error) {
-            console.error('Failed to save base:', error);
+            console.error(t('Failed to save base:'), error);
         }
     };
 
@@ -90,23 +93,23 @@ export const KnowledgeBaseFormPage = () => {
 
     if (isLoadingKnowledgeBase && knowledgeBaseUuid) {
         return (
-            <div className="flex justify-center items-center max-h-screen p-6">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
-                    <p className="text-gray-500">Loading knowledge base...</p>
-                </div>
+            <div className="flex flex-row items-center justify-center gap-2 p-6">
+                <Spinner className="size-8" />
+                <p>{t('Loading knowledge base...')}</p>
             </div>
         );
     }
 
     return (
-        <div className="flex justify-center max-h-screen">
-            <div className="p-6 max-w-2xl w-full">
+        <div className="flex max-h-screen justify-center">
+            <div className="w-full max-w-2xl p-6">
                 {formBase && (isManaging || (!isEditing && !knowledgeBaseUuid)) ? (
                     <>
-                        <h2 className="text-xl font-semibold mb-1">{formBase.name}</h2>
+                        <Heading level={2} className="mb-1">
+                            {formBase.name}
+                        </Heading>
                         {formBase.description && (
-                            <p className="text-xs text-gray-400 mb-1">{formBase.description}</p>
+                            <p className="mb-1 caption-01">{formBase.description}</p>
                         )}
                         <FileUploader
                             onFilesChange={() => {}}
@@ -117,8 +120,8 @@ export const KnowledgeBaseFormPage = () => {
                     </>
                 ) : (
                     <>
-                        <h2 className="text-xl font-semibold mb-4">
-                            {isEditing ? 'Edit Knowledge Base' : 'Create a Knowledge Base'}
+                        <h2 className="mb-4 text-xl font-semibold">
+                            {isEditing ? t('Edit Knowledge Base') : t('Create a Knowledge Base')}
                         </h2>
                         <KnowledgeBaseForm
                             onSave={handleSave}

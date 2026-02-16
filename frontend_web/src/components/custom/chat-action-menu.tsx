@@ -9,8 +9,10 @@ import { Button } from '@/components/ui/button.tsx';
 import { EllipsisVertical, TextCursorInput, Trash } from 'lucide-react';
 import { IChat } from '@/api/chat/types.ts';
 import { useAppState } from '@/state';
+import { useTranslation } from '@/lib/i18n';
 
 export function ChatActionMenu({ chat }: { chat: IChat }) {
+    const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const { setShowRenameChatModalForId, setShowDeleteChatModalForId } = useAppState();
 
@@ -34,7 +36,7 @@ export function ChatActionMenu({ chat }: { chat: IChat }) {
         <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
                 <Button
-                    className="justify-self-end cursor-pointer"
+                    className="cursor-pointer justify-self-end"
                     variant="ghost"
                     size="icon"
                     onClick={() => true}
@@ -43,19 +45,13 @@ export function ChatActionMenu({ chat }: { chat: IChat }) {
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                    onClick={() => handleRenameChat(chat.uuid)}
-                    className="cursor-pointer"
-                >
+                <DropdownMenuItem onClick={() => handleRenameChat(chat.uuid)} variant="default">
                     <TextCursorInput />
-                    Rename
+                    {t('Rename')}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                    onClick={() => handleDeleteChat(chat.uuid)}
-                    className="cursor-pointer"
-                >
+                <DropdownMenuItem onClick={() => handleDeleteChat(chat.uuid)} variant="destructive">
                     <Trash />
-                    Delete
+                    {t('Delete')}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

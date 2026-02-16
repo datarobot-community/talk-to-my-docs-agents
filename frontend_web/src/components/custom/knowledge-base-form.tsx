@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { DATA_VISIBILITY } from '@/state/constants';
 import { Input } from '@/components/ui/input';
 import { TFormData } from '@/types';
+import { useTranslation } from '@/lib/i18n';
 
 type INewBaseForm = {
     formValues?: TFormData;
@@ -25,6 +26,7 @@ export function KnowledgeBaseForm({
     isLoading = false,
     isEditing = false,
 }: INewBaseForm) {
+    const { t } = useTranslation();
     const [name, setName] = useState(formValues?.name || '');
     const [description, setDescription] = useState(formValues?.description || '');
     const [isPublic, setIsPublic] = useState(formValues?.is_public || false);
@@ -47,10 +49,10 @@ export function KnowledgeBaseForm({
         });
     };
     return (
-        <form onSubmit={handleSave} className="flex gap-4 flex-col">
+        <form onSubmit={handleSave} className="flex flex-col gap-4">
             <Label className="mt-4 block">
-                <span className="text-sm font-medium">What are you working on?</span>
-                <span className="ml-1 text-xs text-gray-400">(Required)</span>
+                <span className="body">{t('What are you working on?')}</span>
+                <span className="ml-1 caption-01">{t('(Required)')}</span>
             </Label>
             <div>
                 <Input
@@ -60,19 +62,19 @@ export function KnowledgeBaseForm({
                     onChange={e => setName(e.target.value)}
                     required
                     maxLength={MAX_NAME_CHARS}
-                    placeholder="Will be used as Knowledge Base name"
-                    className="w-full dark:bg-accent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-gray-500"
+                    placeholder={t('Will be used as Knowledge Base name')}
+                    className="w-full"
                 />
-                <div className="text-xs text-gray-400 text-right mt-1">
-                    ({name.length}/{MAX_NAME_CHARS} characters)
+                <div className="mt-1 caption-01 text-right">
+                    ({name.length}/{MAX_NAME_CHARS} {t('characters')})
                 </div>
             </div>
 
             <Label className="mt-4 block">
-                <span className="text-sm font-medium">What are you trying to achieve?</span>
-                <span className="ml-1 text-xs text-gray-400">(Required)</span>
-                <p className="text-gray-400 text-sm">
-                    A detailed description helps generate more accurate results.
+                <span className="body">{t('What are you trying to achieve?')}</span>
+                <span className="ml-1 caption-01">{t('(Required)')}</span>
+                <p className="body-secondary">
+                    {t('A detailed description helps generate more accurate results.')}
                 </p>
             </Label>
             <div>
@@ -80,64 +82,50 @@ export function KnowledgeBaseForm({
                     data-testid="description-textarea"
                     value={description}
                     required
-                    placeholder="Additional context for the Knowledge Base"
-                    className="w-full dark:bg-accent focus-visible:border-ring focus-visible:ring-0 focus-visible:ring-offset-0  placeholder:text-gray-500 pb-0"
+                    placeholder={t('Additional context for the Knowledge Base')}
+                    className="w-full pb-0"
                     onChange={e => setDescription(e.target.value)}
                     rows={3}
                     maxLength={MAX_DESCRIPTION_CHARS}
                 />
-                <div className="text-xs text-gray-400 text-right mt-1">
-                    ({description.length}/{MAX_DESCRIPTION_CHARS} characters)
+                <div className="mt-1 caption-01 text-right">
+                    ({description.length}/{MAX_DESCRIPTION_CHARS} {t('characters')})
                 </div>
             </div>
 
             <Label className="mt-4">
-                <span className="text-sm font-medium">Visibility</span>
+                <span className="body">{t('Visibility')}</span>
             </Label>
             <RadioGroup
                 value={isPublic ? DATA_VISIBILITY.PUBLIC : DATA_VISIBILITY.PRIVATE}
                 onValueChange={v => setIsPublic(v === DATA_VISIBILITY.PUBLIC)}
             >
                 <div className="flex items-center space-x-2">
-                    <RadioGroupItem
-                        value={DATA_VISIBILITY.PUBLIC}
-                        id="r1"
-                        className="dark:bg-accent"
-                    />
+                    <RadioGroupItem value={DATA_VISIBILITY.PUBLIC} id="r1" />
                     <div>
-                        <Label
-                            data-testid="datarobot-radio"
-                            className="text-sm font-medium"
-                            htmlFor="r1"
-                        >
-                            All app users
+                        <Label data-testid="datarobot-radio" className="body" htmlFor="r1">
+                            {t('All app users')}
                         </Label>
-                        <div className="text-sm text-gray-400">
-                            Everyone with access to this app can view and use this knowledge base
+                        <div className="body-secondary">
+                            {t(
+                                'Everyone with access to this app can view and use this knowledge base'
+                            )}
                         </div>
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                    <RadioGroupItem
-                        value={DATA_VISIBILITY.PRIVATE}
-                        id="r2"
-                        className="dark:bg-accent"
-                    />
+                    <RadioGroupItem value={DATA_VISIBILITY.PRIVATE} id="r2" />
                     <div>
-                        <Label
-                            data-testid="private-radio"
-                            className="text-sm font-medium"
-                            htmlFor="r2"
-                        >
-                            Private
+                        <Label data-testid="private-radio" className="body" htmlFor="r2">
+                            {t('Private')}
                         </Label>
-                        <div className="text-sm text-gray-400">
-                            Only you can view and use this knowledge base
+                        <div className="body-secondary">
+                            {t('Only you can view and use this knowledge base')}
                         </div>
                     </div>
                 </div>
             </RadioGroup>
-            <div className="flex justify-end gap-4 mt-4">
+            <div className="mt-4 flex justify-end gap-4">
                 <Button
                     data-testid="cancel-button"
                     className="cursor-pointer"
@@ -146,7 +134,7 @@ export function KnowledgeBaseForm({
                     type="button"
                     disabled={isLoading}
                 >
-                    Cancel
+                    {t('Cancel')}
                 </Button>
                 <Button
                     data-testid="create-button"
@@ -155,10 +143,10 @@ export function KnowledgeBaseForm({
                     disabled={!name.trim() || !description.trim() || isLoading}
                 >
                     {isLoading
-                        ? 'Saving...'
+                        ? t('Saving...')
                         : isEditing
-                          ? 'Update knowledge base'
-                          : 'Create knowledge base'}
+                          ? t('Update knowledge base')
+                          : t('Create knowledge base')}
                 </Button>
             </div>
         </form>

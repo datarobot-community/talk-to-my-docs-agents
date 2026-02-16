@@ -56,7 +56,13 @@ class HeartbeatEvent:
     type: str = "heartbeat"
 
 
-StreamEvent = MessageEvent | SnapshotEvent | HeartbeatEvent
+@dataclass
+class TaskProgressEvent:
+    data: dict[str, Any]
+    type: str = "task_progress"
+
+
+StreamEvent = MessageEvent | SnapshotEvent | HeartbeatEvent | TaskProgressEvent
 
 _HEARTBEAT_SECONDS = 25  # send a keep-alive event roughly every 25 seconds
 # Cap per-subscriber queue so a stalled client cannot build up unbounded events in memory.

@@ -22,13 +22,15 @@ import aiohttp
 import httpx
 from aiogoogle.auth.creds import UserCreds
 from aiogoogle.client import Aiogoogle
+from aiogoogle.excs import AuthError as AiogoogleAuthError
 from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
+from box_sdk_gen.box.errors import BoxAPIError, BoxSDKError
 from box_sdk_gen.schemas import Items as BoxItems
 from core.persistent_fs.dr_file_system import get_file_system
 from datarobot.auth.oauth import OAuthToken
 from datarobot.auth.session import AuthCtx
 from datarobot.auth.typing import Metadata
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.schema import ErrorCodes, ErrorSchema
@@ -37,7 +39,7 @@ from app.files import File as DBFile
 from app.files import FileCreate, FileUpdate, get_or_create_encoded_content
 from app.files.models import FileRepository
 from app.knowledge_bases import KnowledgeBaseRepository
-from app.users.identity import ProviderType
+from app.users.identity import IdentityRepository, IdentityUpdate, ProviderType
 from app.users.user import UserRepository
 from core import document_loader
 
@@ -118,13 +120,45 @@ def _is_supported_file_type(filename: str, mime_type: str | None = None) -> bool
     return file_extension in document_loader.SUPPORTED_FILE_TYPES
 
 
+async def _mark_identity_needs_reauth(
+    request: Request, auth_ctx: AuthCtx[Metadata], provider_type: str
+) -> None:
+    """
+    Mark the user's identity for the given provider as needing re-authorization.
+    This is called when the OAuth token is rejected by the provider (e.g., user revoked access).
+    """
+    identity_repo: IdentityRepository = request.app.state.deps.identity_repo
+
+    # Find the identity for this provider type
+    identity = next(
+        (
+            ident
+            for ident in auth_ctx.identities
+            if ident.provider_type == provider_type
+        ),
+        None,
+    )
+
+    if identity and identity.id:
+        logger.info(
+            "Marking identity as needs_reauth",
+            extra={"identity_id": identity.id, "provider_type": provider_type},
+        )
+        await identity_repo.update_identity(
+            identity_id=int(identity.id),
+            update=IdentityUpdate(needs_reauth=True),
+        )
+
+
 @files_router.get(
     "/docs/google/files/",
     responses={401: {"model": ErrorSchema}, 409: {"model": ErrorSchema}},
 )
 async def get_google_files(
+    request: Request,
     folder_id: str | None = None,
     token_data: OAuthToken = Depends(get_access_token(ProviderType.GOOGLE)),
+    auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx),
 ) -> FilesListSchema:
     files = []
     user_creds = UserCreds(
@@ -140,52 +174,69 @@ async def get_google_files(
             status_code=401, detail="Invalid or expired Google access token"
         )
 
-    async with Aiogoogle(user_creds=user_creds) as aiogoogle:
-        drive_v3 = await aiogoogle.discover("drive", "v3")
+    try:
+        async with Aiogoogle(user_creds=user_creds) as aiogoogle:
+            drive_v3 = await aiogoogle.discover("drive", "v3")
 
-        if folder_id:
-            query = (
-                f"'{folder_id}' in parents and trashed=false and {GDRIVE_MIME_TYPES}"
-            )
-        else:
-            query = GDRIVE_MIME_TYPES
+            if folder_id:
+                query = f"'{folder_id}' in parents and trashed=false and {GDRIVE_MIME_TYPES}"
+            else:
+                query = GDRIVE_MIME_TYPES
 
-        req = drive_v3.files.list(
-            q=query,
-            fields="nextPageToken, files(id, name, mimeType)",
-        )
-
-        # full_res=True gives you an async iterator over pages
-        page_count = 0
-        async for page in await aiogoogle.as_user(req, full_res=True):  # type: ignore[no-untyped-call]
-            if page_count >= GOOGLE_MAX_PAGES:
-                break
-            page_count += 1
-
-            logger.debug(
-                "fetched google drive files",
-                extra={"files": page, "folder_id": folder_id},
+            req = drive_v3.files.list(
+                q=query,
+                fields="nextPageToken, files(id, name, mimeType)",
             )
 
-            for file in page.get("files", []):
-                mime_type = file.get("mimeType")
-                filename = file.get("name", "")
+            # full_res=True gives you an async iterator over pages
+            page_count = 0
+            async for page in await aiogoogle.as_user(req, full_res=True):  # type: ignore[no-untyped-call]
+                if page_count >= GOOGLE_MAX_PAGES:
+                    break
+                page_count += 1
 
-                # Skip folders (we always want to show them)
-                is_folder = mime_type == GDRIVE_FOLDER_MIME_TYPE
-
-                # For files, only include supported types (including exportable Google Apps files)
-                if not is_folder and not _is_supported_file_type(filename, mime_type):
-                    continue
-
-                files.append(
-                    File(
-                        id=file["id"],
-                        type=FileType.FOLDER if is_folder else FileType.FILE,
-                        name=filename,
-                        mime_type=mime_type,
-                    )
+                logger.debug(
+                    "fetched google drive files",
+                    extra={"files": page, "folder_id": folder_id},
                 )
+
+                for file in page.get("files", []):
+                    mime_type = file.get("mimeType")
+                    filename = file.get("name", "")
+
+                    # Skip folders (we always want to show them)
+                    is_folder = mime_type == GDRIVE_FOLDER_MIME_TYPE
+
+                    # For files, only include supported types (including exportable Google Apps files)
+                    if not is_folder and not _is_supported_file_type(
+                        filename, mime_type
+                    ):
+                        continue
+
+                    files.append(
+                        File(
+                            id=file["id"],
+                            type=FileType.FOLDER if is_folder else FileType.FILE,
+                            name=filename,
+                            mime_type=mime_type,
+                        )
+                    )
+
+    except AiogoogleAuthError as e:
+        # Access token was rejected by Google (likely revoked by user)
+        logger.warning(
+            "Google API auth error - token may have been revoked",
+            extra={"error": str(e)},
+        )
+        # Mark the identity as needing re-authorization
+        await _mark_identity_needs_reauth(request, auth_ctx, ProviderType.GOOGLE.value)
+        err = ErrorSchema(
+            code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+            message="Your Google connection has expired or been revoked. Please reconnect your account in Settings.",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+        )
 
     return FilesListSchema(files=files)
 
@@ -195,8 +246,10 @@ async def get_google_files(
     responses={401: {"model": ErrorSchema}, 409: {"model": ErrorSchema}},
 )
 async def get_box_files(
+    request: Request,
     folder_id: str = BOX_ROOT_FOLDER_ID,
     token_data: OAuthToken = Depends(get_access_token(ProviderType.BOX)),
+    auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx),
 ) -> FilesListSchema:
     box_client = BoxClient(
         auth=BoxDeveloperTokenAuth(token=token_data.access_token),
@@ -204,10 +257,42 @@ async def get_box_files(
 
     files = FilesListSchema(files=[])
 
-    # Box SDK is synchronous only
-    box_files: BoxItems = await asyncio.get_running_loop().run_in_executor(
-        None, box_client.folders.get_folder_items, folder_id
-    )
+    try:
+        # Box SDK is synchronous only
+        box_files: BoxItems = await asyncio.get_running_loop().run_in_executor(
+            None, box_client.folders.get_folder_items, folder_id
+        )
+    except BoxSDKError as e:
+        # BoxSDKError is raised when the developer token has expired/been revoked
+        # This happens during the SDK's internal token refresh attempt
+        logger.warning(
+            "Box SDK error - token may have expired or been revoked",
+            extra={"error": str(e), "error_message": e.message},
+        )
+        await _mark_identity_needs_reauth(request, auth_ctx, ProviderType.BOX.value)
+        err = ErrorSchema(
+            code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+            message="Your Box connection has expired or been revoked. Please reconnect your account in Settings.",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+        )
+    except BoxAPIError as e:
+        # Check if this is an auth-related error (401 Unauthorized)
+        if e.response_info.status_code == 401:
+            logger.warning(
+                "Box API auth error - token may have been revoked",
+                extra={"error": str(e), "status_code": e.response_info.status_code},
+            )
+            await _mark_identity_needs_reauth(request, auth_ctx, ProviderType.BOX.value)
+            err = ErrorSchema(
+                code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+                message="Your Box connection has expired or been revoked. Please reconnect your account in Settings.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+            )
+        raise
 
     logger.debug(
         "fetched box files", extra={"files": box_files, "folder_id": folder_id}
@@ -589,201 +674,233 @@ async def upload_drive_files(
 
     results: list[FileSchema | dict[str, Any]] = []
 
-    async with Aiogoogle(user_creds=user_creds) as aiogoogle:
-        drive_v3 = await aiogoogle.discover("drive", "v3")
+    try:
+        async with Aiogoogle(user_creds=user_creds) as aiogoogle:
+            drive_v3 = await aiogoogle.discover("drive", "v3")
 
-        for file_id in file_ids:
-            try:
-                # Get file metadata using keyword parameters
-                file_metadata = await aiogoogle.as_user(
-                    drive_v3.files.get(fileId=file_id, fields="id,name,mimeType,size")  # type: ignore[no-untyped-call]
-                )
-
-                filename = file_metadata.get("name") or f"drive_file_{file_id}"
-                mime_type = file_metadata.get("mimeType")
-
-                # Handle Google Apps files by exporting them
-                is_google_app = mime_type and mime_type in GOOGLE_APPS_EXPORTABLE
-                if is_google_app:
-                    # Export Google Apps file to supported format
-                    export_format = GOOGLE_APPS_EXPORTABLE[mime_type]
-                    export_mime_type = {
-                        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    }.get(export_format)
-
-                    if not export_mime_type:
-                        results.append(
-                            {
-                                "filename": filename,
-                                "error": f"Cannot export {mime_type} to a supported format",
-                            }
-                        )
-                        continue
-
-                    # Update filename to include proper extension
-                    if not filename.lower().endswith(f".{export_format}"):
-                        filename = f"{pathlib.Path(filename).stem}.{export_format}"
-
-                    # Download exported content
-                    file_content = await aiogoogle.as_user(
-                        drive_v3.files.export(fileId=file_id, mimeType=export_mime_type)  # type: ignore[no-untyped-call]
-                    )
-                else:
-                    # Skip other Google Apps files that we can't export
-                    if mime_type and mime_type.startswith(
-                        "application/vnd.google-apps"
-                    ):
-                        results.append(
-                            {
-                                "filename": filename,
-                                "error": "This Google Apps file type cannot be exported to a supported format.",
-                            }
-                        )
-                        continue
-
-                    # Check file extension for regular files
-                    file_extension = pathlib.Path(filename).suffix.lower().lstrip(".")
-                    if file_extension not in document_loader.SUPPORTED_FILE_TYPES:
-                        results.append(
-                            {
-                                "filename": filename,
-                                "error": f"Unsupported file type: {file_extension}",
-                            }
-                        )
-                        continue
-
-                    # Download regular file content
-                    try:
-                        # Try the standard download method first
-                        file_content = await aiogoogle.as_user(
-                            drive_v3.files.get(fileId=file_id, alt="media")  # type: ignore[no-untyped-call]
-                        )
-
-                        # If we get a dict response, it might be metadata instead of content
-                        if isinstance(file_content, dict):
-                            # Check if this is download metadata with a download URI
-                            if (
-                                "response" in file_content
-                                and "downloadUri" in file_content.get("response", {})
-                            ):
-                                download_uri = file_content["response"]["downloadUri"]
-                                # Make a direct HTTP request to download the file
-                                headers = {
-                                    "Authorization": f"Bearer {token_data.access_token}"
-                                }
-                                async with aiohttp.ClientSession() as session:
-                                    async with session.get(
-                                        download_uri, headers=headers
-                                    ) as resp:
-                                        if resp.status == 200:
-                                            file_content = await resp.read()
-                                        else:
-                                            raise Exception(
-                                                f"Failed to download file: HTTP {resp.status}"
-                                            )
-                            else:
-                                # If it's a dict but not downloaded metadata, try to convert to string
-                                file_content = str(file_content).encode("utf-8")
-                                logger.warning(
-                                    f"Got unexpected dict response for file {file_id}: {file_content[:200].decode('utf-8', errors='replace')}..."
-                                )
-
-                    except Exception as download_error:
-                        logger.warning(
-                            f"Standard download failed for {file_id}: {download_error}, trying alternative method"
-                        )
-                        # Fallback: try using httpx to make a direct API call
-                        download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
-                        headers = {"Authorization": f"Bearer {token_data.access_token}"}
-
-                        async with httpx.AsyncClient() as client:
-                            response = await client.get(download_url, headers=headers)
-                            if response.status_code == 200:
-                                file_content = response.content
-                            else:
-                                raise Exception(
-                                    f"Failed to download file via fallback method: HTTP {response.status_code}"
-                                )
-
-                # Ensure file_content is bytes
-                if isinstance(file_content, str):
-                    file_content = file_content.encode("utf-8")
-                elif not isinstance(file_content, bytes):
-                    # Handle other types by converting to string first then bytes
-                    file_content = (
-                        str(file_content).encode("utf-8") if file_content else b""
-                    )
-
-                # Create directory structure based on base or user
-                if knowledge_base_id:
-                    # Use base path for files attached to a base
-                    knowledge_base = await request.app.state.deps.knowledge_base_repo.get_knowledge_base(
-                        current_user,
-                        knowledge_base_uuid=knowledge_base_uuid,
-                    )
-                    file_dir = (
-                        pathlib.Path(request.app.state.deps.upload_path)
-                        / knowledge_base.path
-                    )
-                else:
-                    # Use user's UUID for standalone files
-                    file_dir = pathlib.Path(request.app.state.deps.upload_path) / str(
-                        user_uuid
-                    )
-
-                fs = get_file_system()
-                # Ensure directory exists
+            for file_id in file_ids:
                 try:
-                    fs.mkdir(str(file_dir), create_parents=True)
-                except FileExistsError:
-                    pass
-
-                file_path = str(file_dir / filename)
-
-                # Save the file
-                with fs.open(file_path, "wb") as buffer:
-                    buffer.write(file_content)
-
-                # Create file record in database
-                source = "google_drive"
-                if is_google_app:
-                    source = f"google_{GOOGLE_APPS_EXPORTABLE[mime_type]}"  # e.g., "google_docx", "google_pptx"
-
-                file_data = FileCreate(
-                    filename=filename,
-                    source=source,
-                    file_path=file_path,
-                    external_id=file_id,
-                    mime_type=mime_type,
-                    size_bytes=len(file_content),
-                    knowledge_base_id=knowledge_base_id,
-                )
-
-                db_file = await file_repo.create_file(
-                    file_data, owner_id=int(auth_ctx.user.id)
-                )
-
-                # Encode the document in the background (don't wait for it)
-                asyncio.create_task(
-                    get_or_create_encoded_content(
-                        file=db_file,
-                        file_repo=file_repo,
-                        knowledge_base=knowledge_base,
-                        knowledge_base_repo=knowledge_base_repo,
+                    # Get file metadata using keyword parameters
+                    file_metadata = await aiogoogle.as_user(
+                        drive_v3.files.get(
+                            fileId=file_id, fields="id,name,mimeType,size"
+                        )  # type: ignore[no-untyped-call]
                     )
-                )
 
-                results.append(FileSchema.from_file(db_file, owner_uuid=user_uuid))
+                    filename = file_metadata.get("name") or f"drive_file_{file_id}"
+                    mime_type = file_metadata.get("mimeType")
 
-            except Exception as e:
-                logger.exception("Failed to import from Google Drive")
-                results.append(
-                    {
-                        "file_id": file_id,
-                        "error": f"Failed to import file from Google Drive: {str(e)}",
-                    }
-                )
+                    # Handle Google Apps files by exporting them
+                    is_google_app = mime_type and mime_type in GOOGLE_APPS_EXPORTABLE
+                    if is_google_app:
+                        # Export Google Apps file to supported format
+                        export_format = GOOGLE_APPS_EXPORTABLE[mime_type]
+                        export_mime_type = {
+                            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        }.get(export_format)
+
+                        if not export_mime_type:
+                            results.append(
+                                {
+                                    "filename": filename,
+                                    "error": f"Cannot export {mime_type} to a supported format",
+                                }
+                            )
+                            continue
+
+                        # Update filename to include proper extension
+                        if not filename.lower().endswith(f".{export_format}"):
+                            filename = f"{pathlib.Path(filename).stem}.{export_format}"
+
+                        # Download exported content
+                        file_content = await aiogoogle.as_user(
+                            drive_v3.files.export(
+                                fileId=file_id, mimeType=export_mime_type
+                            )  # type: ignore[no-untyped-call]
+                        )
+                    else:
+                        # Skip other Google Apps files that we can't export
+                        if mime_type and mime_type.startswith(
+                            "application/vnd.google-apps"
+                        ):
+                            results.append(
+                                {
+                                    "filename": filename,
+                                    "error": "This Google Apps file type cannot be exported to a supported format.",
+                                }
+                            )
+                            continue
+
+                        # Check file extension for regular files
+                        file_extension = (
+                            pathlib.Path(filename).suffix.lower().lstrip(".")
+                        )
+                        if file_extension not in document_loader.SUPPORTED_FILE_TYPES:
+                            results.append(
+                                {
+                                    "filename": filename,
+                                    "error": f"Unsupported file type: {file_extension}",
+                                }
+                            )
+                            continue
+
+                        # Download regular file content
+                        try:
+                            # Try the standard download method first
+                            file_content = await aiogoogle.as_user(
+                                drive_v3.files.get(fileId=file_id, alt="media")  # type: ignore[no-untyped-call]
+                            )
+
+                            # If we get a dict response, it might be metadata instead of content
+                            if isinstance(file_content, dict):
+                                # Check if this is download metadata with a download URI
+                                if (
+                                    "response" in file_content
+                                    and "downloadUri"
+                                    in file_content.get("response", {})
+                                ):
+                                    download_uri = file_content["response"][
+                                        "downloadUri"
+                                    ]
+                                    # Make a direct HTTP request to download the file
+                                    headers = {
+                                        "Authorization": f"Bearer {token_data.access_token}"
+                                    }
+                                    async with aiohttp.ClientSession() as session:
+                                        async with session.get(
+                                            download_uri, headers=headers
+                                        ) as resp:
+                                            if resp.status == 200:
+                                                file_content = await resp.read()
+                                            else:
+                                                raise Exception(
+                                                    f"Failed to download file: HTTP {resp.status}"
+                                                )
+                                else:
+                                    # If it's a dict but not downloaded metadata, try to convert to string
+                                    file_content = str(file_content).encode("utf-8")
+                                    logger.warning(
+                                        f"Got unexpected dict response for file {file_id}: {file_content[:200].decode('utf-8', errors='replace')}..."
+                                    )
+
+                        except Exception as download_error:
+                            logger.warning(
+                                f"Standard download failed for {file_id}: {download_error}, trying alternative method"
+                            )
+                            # Fallback: try using httpx to make a direct API call
+                            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+                            headers = {
+                                "Authorization": f"Bearer {token_data.access_token}"
+                            }
+
+                            async with httpx.AsyncClient() as client:
+                                response = await client.get(
+                                    download_url, headers=headers
+                                )
+                                if response.status_code == 200:
+                                    file_content = response.content
+                                else:
+                                    raise Exception(
+                                        f"Failed to download file via fallback method: HTTP {response.status_code}"
+                                    )
+
+                    # Ensure file_content is bytes
+                    if isinstance(file_content, str):
+                        file_content = file_content.encode("utf-8")
+                    elif not isinstance(file_content, bytes):
+                        # Handle other types by converting to string first then bytes
+                        file_content = (
+                            str(file_content).encode("utf-8") if file_content else b""
+                        )
+
+                    # Create directory structure based on base or user
+                    if knowledge_base_id:
+                        # Use base path for files attached to a base
+                        knowledge_base = await request.app.state.deps.knowledge_base_repo.get_knowledge_base(
+                            current_user,
+                            knowledge_base_uuid=knowledge_base_uuid,
+                        )
+                        file_dir = (
+                            pathlib.Path(request.app.state.deps.upload_path)
+                            / knowledge_base.path
+                        )
+                    else:
+                        # Use user's UUID for standalone files
+                        file_dir = pathlib.Path(
+                            request.app.state.deps.upload_path
+                        ) / str(user_uuid)
+
+                    fs = get_file_system()
+                    # Ensure directory exists
+                    try:
+                        fs.mkdir(str(file_dir), create_parents=True)
+                    except FileExistsError:
+                        pass
+
+                    file_path = str(file_dir / filename)
+
+                    # Save the file
+                    with fs.open(file_path, "wb") as buffer:
+                        buffer.write(file_content)
+
+                    # Create file record in database
+                    source = "google_drive"
+                    if is_google_app:
+                        source = f"google_{GOOGLE_APPS_EXPORTABLE[mime_type]}"  # e.g., "google_docx", "google_pptx"
+
+                    file_data = FileCreate(
+                        filename=filename,
+                        source=source,
+                        file_path=file_path,
+                        external_id=file_id,
+                        mime_type=mime_type,
+                        size_bytes=len(file_content),
+                        knowledge_base_id=knowledge_base_id,
+                    )
+
+                    db_file = await file_repo.create_file(
+                        file_data, owner_id=int(auth_ctx.user.id)
+                    )
+
+                    # Encode the document in the background (don't wait for it)
+                    asyncio.create_task(
+                        get_or_create_encoded_content(
+                            file=db_file,
+                            file_repo=file_repo,
+                            knowledge_base=knowledge_base,
+                            knowledge_base_repo=knowledge_base_repo,
+                        )
+                    )
+
+                    results.append(FileSchema.from_file(db_file, owner_uuid=user_uuid))
+
+                except AiogoogleAuthError:
+                    # Re-raise auth errors to be handled at the outer level
+                    raise
+                except Exception as e:
+                    logger.exception("Failed to import from Google Drive")
+                    results.append(
+                        {
+                            "file_id": file_id,
+                            "error": f"Failed to import file from Google Drive: {str(e)}",
+                        }
+                    )
+
+    except AiogoogleAuthError as e:
+        # Access token was rejected by Google (likely revoked by user)
+        logger.warning(
+            "Google API auth error during file upload - token may have been revoked",
+            extra={"error": str(e)},
+        )
+        await _mark_identity_needs_reauth(request, auth_ctx, ProviderType.GOOGLE.value)
+        err = ErrorSchema(
+            code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+            message="Your Google connection has expired or been revoked. Please reconnect your account in Settings.",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+        )
 
     return results
 
@@ -932,6 +1049,44 @@ async def upload_box_files(
 
             results.append(FileSchema.from_file(db_file, owner_uuid=user_uuid))
 
+        except BoxSDKError as e:
+            # BoxSDKError is raised when the developer token has expired/been revoked
+            # This happens during the SDK's internal token refresh attempt
+            logger.warning(
+                "Box SDK error during file upload - token may have expired or been revoked",
+                extra={"error": str(e), "error_message": e.message, "file_id": file_id},
+            )
+            await _mark_identity_needs_reauth(request, auth_ctx, ProviderType.BOX.value)
+            err = ErrorSchema(
+                code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+                message="Your Box connection has expired or been revoked. Please reconnect your account in Settings.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+            )
+        except BoxAPIError as e:
+            # Check if this is an auth-related error (401 Unauthorized)
+            if e.response_info.status_code == 401:
+                logger.warning(
+                    "Box API auth error during file upload - token may have been revoked",
+                    extra={
+                        "error": str(e),
+                        "file_id": file_id,
+                        "status_code": e.response_info.status_code,
+                    },
+                )
+                await _mark_identity_needs_reauth(
+                    request, auth_ctx, ProviderType.BOX.value
+                )
+                err = ErrorSchema(
+                    code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+                    message="Your Box connection has expired or been revoked. Please reconnect your account in Settings.",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+                )
+            # Re-raise other Box errors to be handled by the generic exception handler
+            raise
         except Exception as e:
             error_message = str(e)
             logger.exception(

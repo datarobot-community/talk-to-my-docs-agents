@@ -337,17 +337,31 @@ def test_chat_completion_with_valid_knowledge_base_uuid(
         mock_create_msg.side_effect = [sample_user_message, sample_llm_message]
         mock_augment.return_value = "test message"
 
-        async def _mock_completion(*args: Any, **kwargs: Any) -> dict[str, Any]:
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "Test KB agent response",
+        async def _mock_completion(*args: Any, **kwargs: Any) -> Any:
+            # Support both streaming and non-streaming responses
+            if kwargs.get("stream", False):
+
+                async def _stream() -> Any:
+                    # Simulate streaming chunks
+                    chunk = MagicMock()
+                    chunk.choices = [MagicMock()]
+                    chunk.choices[0].delta = MagicMock()
+                    chunk.choices[0].delta.content = "Test KB agent response"
+                    chunk.choices[0].delta.refusal = None
+                    yield chunk
+
+                return _stream()
+            else:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "Test KB agent response",
+                            }
                         }
-                    }
-                ]
-            }
+                    ]
+                }
 
         mock_acompletion.side_effect = _mock_completion
 
@@ -358,6 +372,7 @@ def test_chat_completion_with_valid_knowledge_base_uuid(
                 "model": model,
                 "knowledge_base_id": valid_uuid,
             },
+            headers={"X-DataRobot-Identity-Token": "identity_token"},
         )
 
         # Make sure the right completion function was called
@@ -365,6 +380,10 @@ def test_chat_completion_with_valid_knowledge_base_uuid(
             assert chat_completion_spy.call_count == 1
         if model == "ttmdocs-agents":
             assert chat_agent_completion_spy.call_count == 1
+
+        assert mock_acompletion.call_args.kwargs["extra_headers"] == {
+            "X-DataRobot-Identity-Token": "identity_token"
+        }
 
         called_kwargs = mock_update_msg.call_args.kwargs
         assert called_kwargs["uuid"] == sample_llm_message.uuid
@@ -858,3 +877,133 @@ class TestErrorFormatting:
         assert _is_wakeup_error("waiting for workload reach > 0 replicas")
         assert _is_wakeup_error("Inference server is unavailable")
         assert not _is_wakeup_error("some other error")
+
+    def test_extract_json_message_from_api_errors(self) -> None:
+        """Test JSON message extraction from various API error formats."""
+        from app.api.v1.chat import _extract_json_message
+
+        # OpenAI error format
+        assert (
+            _extract_json_message(
+                '{"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}}'
+            )
+            == "Rate limit exceeded"
+        )
+
+        # Google/Vertex AI nested error
+        assert (
+            _extract_json_message(
+                '{"error": {"code": 400, "message": "Invalid request", "status": "INVALID_ARGUMENT"}}'
+            )
+            == "Invalid request"
+        )
+
+        # Simple message field
+        assert _extract_json_message('{"message": "Simple error"}') == "Simple error"
+
+        # FastAPI detail (string)
+        assert (
+            _extract_json_message('{"detail": "Not authenticated"}')
+            == "Not authenticated"
+        )
+
+        # FastAPI detail (array) - should return None, not stringify array
+        assert _extract_json_message('{"detail": [{"msg": "field required"}]}') is None
+
+        # Nested error.detail.message
+        assert (
+            _extract_json_message('{"error": {"detail": {"message": "Inner error"}}}')
+            == "Inner error"
+        )
+
+        # No JSON
+        assert _extract_json_message("plain text error") is None
+
+        # Non-string input
+        assert _extract_json_message(123) is None  # type: ignore[arg-type]
+        assert _extract_json_message(None) is None  # type: ignore[arg-type]
+
+        # Error field is a string (not a dict) - should not crash
+        assert _extract_json_message('{"error": "Simple error string"}') is None
+
+    def test_clean_error_message_nested_json(self) -> None:
+        """Test cleaning of nested JSON errors like Google Vertex AI."""
+        from app.api.v1.chat import _clean_error_message
+
+        # Real nested error from Google Vertex AI
+        nested_error = (
+            '{"message":"ERROR: {\\n \\"error\\": {\\n \\"code\\": 400,\\n '
+            '\\"message\\": \\"Request contains text fields that are too large.\\",\\n '
+            '\\"status\\": \\"INVALID_ARGUMENT\\"\\n }\\n}\\n."}'
+        )
+        assert (
+            _clean_error_message(nested_error)
+            == "Request contains text fields that are too large."
+        )
+
+    def test_clean_error_message_strips_errno(self) -> None:
+        """Test that OS error codes are stripped for cleaner user messages."""
+        from app.api.v1.chat import _clean_error_message
+
+        assert _clean_error_message("[Errno 50] Network is down") == "Network is down"
+        assert (
+            _clean_error_message("[Errno 111] Connection refused")
+            == "Connection refused"
+        )
+        assert _clean_error_message("Connection refused") == "Connection refused"
+
+
+class TestTaskProgressProcessor:
+    """Test TaskProgressProcessor's extraction of task_progress events.
+
+    These tests verify that the processor correctly identifies and parses
+    task_progress JSON events, while accumulating all other content.
+    No chunk assembly tests needed - httpx-sse guarantees complete chunks.
+    """
+
+    def test_valid_task_progress_returns_event(self) -> None:
+        """Complete task_progress JSON returns parsed dict."""
+        from app.api.v1.chat import TaskProgressProcessor
+
+        processor = TaskProgressProcessor()
+        result = processor.process_content(
+            '{"task_progress": {"type": "task_started", "task_name": "Search"}}'
+        )
+
+        assert result == {"type": "task_started", "task_name": "Search"}
+        assert processor.content == ""
+
+    def test_non_task_progress_json_goes_to_content(self) -> None:
+        """JSON not starting with marker ends up in content."""
+        from app.api.v1.chat import TaskProgressProcessor
+
+        processor = TaskProgressProcessor()
+        result = processor.process_content('{"other": "data"}')
+
+        assert result is None
+        assert processor.content == '{"other": "data"}'
+
+    def test_regular_text_goes_to_content(self) -> None:
+        """Plain text not starting with marker goes to content."""
+        from app.api.v1.chat import TaskProgressProcessor
+
+        processor = TaskProgressProcessor()
+        result = processor.process_content("Hello, this is regular content.")
+
+        assert result is None
+        assert processor.content == "Hello, this is regular content."
+
+    def test_multiple_task_progress_events(self) -> None:
+        """Multiple task_progress events are handled correctly."""
+        from app.api.v1.chat import TaskProgressProcessor
+
+        processor = TaskProgressProcessor()
+
+        r1 = processor.process_content('{"task_progress": {"type": "started"}}')
+        r2 = processor.process_content("Some content in between")
+        r3 = processor.process_content('{"task_progress": {"type": "completed"}}')
+
+        assert r1 == {"type": "started"}
+        assert r2 is None
+        assert r3 == {"type": "completed"}
+        assert processor.content == "Some content in between"

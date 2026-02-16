@@ -1,0 +1,12 @@
+{
+    "prettier.configPath": "frontend_web/.prettierrc.json",
+    "eslint.format.enable": true,
+    "eslint.lintTask.command": "frontend_web/node_modules/.bin/eslint",
+    "eslint.workingDirectories": ["./frontend_web"],
+    "files.exclude": {
+        "**/.history": true
+    },
+    "[markdown]": {
+        "editor.formatOnSave": false
+    }
+}

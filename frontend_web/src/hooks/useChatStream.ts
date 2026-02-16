@@ -12,12 +12,20 @@ enum StreamEventType {
     SNAPSHOT = 'snapshot',
     MESSAGE = 'message',
     HEARTBEAT = 'heartbeat',
+    TASK_PROGRESS = 'task_progress',
+}
+
+interface TaskProgressData {
+    type: 'task_started' | 'task_completed';
+    task_name: string;
+    agent_name: string;
 }
 
 type StreamEvent =
     | { type: StreamEventType.SNAPSHOT; data: IChatMessage[] }
     | { type: StreamEventType.MESSAGE; data: IChatMessage }
     | { type: StreamEventType.HEARTBEAT; timestamp: string }
+    | { type: StreamEventType.TASK_PROGRESS; data: TaskProgressData }
     | { type: string; data?: unknown };
 
 export const useChatStream = (chatId?: string) => {
@@ -47,6 +55,17 @@ export const useChatStream = (chatId?: string) => {
                 retryTimeoutRef.current = undefined;
             }
         };
+    }, []);
+
+    // Resets the failure count and disables polling fallback when the
+    // browser detects network is back, triggering SSE reconnection.
+    useEffect(() => {
+        const handleOnline = () => {
+            failureCountRef.current = 0;
+            setIsPollingFallbackActive(false);
+        };
+        window.addEventListener('online', handleOnline);
+        return () => window.removeEventListener('online', handleOnline);
     }, []);
 
     // Spin up an SSE stream per chat; if it keeps failing we switch to polling.
@@ -125,8 +144,58 @@ export const useChatStream = (chatId?: string) => {
                         // No processing needed, just maintains SSE connection
                         break;
 
+                    case StreamEventType.TASK_PROGRESS:
+                        // Update the in-progress message's task_outputs
+                        if (streamEvent.data) {
+                            const taskData = streamEvent.data as TaskProgressData;
+                            queryClient.setQueryData<IChatMessage[]>(
+                                chatKeys.messages(chatId),
+                                (old = []) => {
+                                    // Find the in-progress assistant message
+                                    const inProgressIdx = old.findIndex(
+                                        msg => msg.in_progress && msg.role === 'assistant'
+                                    );
+                                    if (inProgressIdx < 0) return old;
+
+                                    const next = [...old];
+                                    const message = { ...next[inProgressIdx] };
+                                    const taskOutputs = [...(message.task_outputs || [])];
+
+                                    if (taskData.type === 'task_started') {
+                                        // Add new task with in_progress status
+                                        taskOutputs.push({
+                                            task_name: taskData.task_name,
+                                            agent_name: taskData.agent_name,
+                                            status: 'in_progress',
+                                        });
+                                    } else if (taskData.type === 'task_completed') {
+                                        // Find task with matching name and agent, mark complete
+                                        const completedTaskName = taskData.task_name;
+                                        const completedAgentName = taskData.agent_name;
+                                        for (let i = taskOutputs.length - 1; i >= 0; i--) {
+                                            if (
+                                                taskOutputs[i].task_name === completedTaskName &&
+                                                taskOutputs[i].agent_name === completedAgentName
+                                            ) {
+                                                taskOutputs[i] = {
+                                                    ...taskOutputs[i],
+                                                    status: 'completed',
+                                                };
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    message.task_outputs = taskOutputs;
+                                    next[inProgressIdx] = message;
+                                    return next;
+                                }
+                            );
+                        }
+                        break;
+
                     default:
-                        // Unknown event type - ignore
+                        console.warn('Unknown chat stream event type', streamEvent);
                         break;
                 }
             } catch (error) {

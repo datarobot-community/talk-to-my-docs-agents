@@ -2,6 +2,7 @@ import React, { PropsWithChildren, HTMLAttributes } from 'react';
 import { cn, extractText, isSuggestedPrompt } from '@/lib/utils';
 import { SquareArrowOutUpRight } from 'lucide-react';
 import { InteractiveSuggestion } from '../components/custom/interactive-suggestion';
+import { Heading } from '@/components/ui/heading';
 
 type MarkdownComponentProps = PropsWithChildren<HTMLAttributes<HTMLElement>>;
 
@@ -24,7 +25,7 @@ export const MARKDOWN_COMPONENTS = {
 
         return (
             <ul
-                className={cn('leading-relaxed my-4', hasSuggestion ? 'pl-0' : 'list-disc pl-8 ')}
+                className={cn('my-4 leading-relaxed', hasSuggestion ? 'pl-0' : 'list-disc pl-8')}
                 {...props}
             >
                 {children}
@@ -32,7 +33,7 @@ export const MARKDOWN_COMPONENTS = {
         );
     },
     ol: ({ children, ...props }: MarkdownComponentProps) => (
-        <ol className="list-decimal leading-relaxed pl-8 my-4" {...props}>
+        <ol className="my-4 list-decimal pl-8 leading-relaxed" {...props}>
             {children}
         </ol>
     ),
@@ -65,7 +66,7 @@ export const MARKDOWN_COMPONENTS = {
                 .trim();
 
             return (
-                <li className="my-1 break-words" {...props}>
+                <li className="my-1 wrap-break-word" {...props}>
                     <InteractiveSuggestion question={questionText} />
                 </li>
             );
@@ -78,27 +79,22 @@ export const MARKDOWN_COMPONENTS = {
         );
     },
     h1: ({ children, ...props }: MarkdownComponentProps) => (
-        <h1 className="text-4xl font-bold leading-tight mt-6 mb-4" {...props}>
+        <Heading level={1} className="mt-6 mb-4" {...props}>
             {children}
-        </h1>
+        </Heading>
     ),
     h2: ({ children, ...props }: MarkdownComponentProps) => (
-        <h2 className="text-3xl font-semibold leading-snug mt-6 mb-4" {...props}>
+        <Heading level={2} className="mt-6 mb-4" {...props}>
             {children}
-        </h2>
+        </Heading>
     ),
     h3: ({ children, ...props }: MarkdownComponentProps) => (
-        <h3 className="text-2xl font-semibold leading-snug mt-4 mb-2" {...props}>
+        <Heading level={3} className="mt-4 mb-2" {...props}>
             {children}
-        </h3>
-    ),
-    h4: ({ children, ...props }: MarkdownComponentProps) => (
-        <h4 className="text-xl font-semibold leading-snug mt-4 mb-2" {...props}>
-            {children}
-        </h4>
+        </Heading>
     ),
     p: ({ children, ...props }: MarkdownComponentProps) => (
-        <p className="text-base leading-relaxed" {...props}>
+        <p className="body leading-relaxed" {...props}>
             {children}
         </p>
     ),
@@ -114,11 +110,7 @@ export const MARKDOWN_COMPONENTS = {
         </td>
     ),
     a: ({ children, ...props }: MarkdownComponentProps) => (
-        <a
-            target="_blank"
-            className="inline-flex items-center text-blue-400 hover:text-blue-300 hover:underline"
-            {...props}
-        >
+        <a target="_blank" className="inline-flex items-center anchor" {...props}>
             {children}
             <SquareArrowOutUpRight size={18} className="ml-1" />
         </a>

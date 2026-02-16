@@ -1,9 +1,11 @@
 import { ChevronDown, MessagesSquare, BookOpenText, UserRound } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import drLogo from '@/assets/DataRobot_white.svg';
+import { useMemo } from 'react';
+import { useTheme } from '@/theme/theme-provider';
+import drLogoDark from '@/assets/DataRobot_black.svg';
+import drLogoLight from '@/assets/DataRobot_white.svg';
 import drIcon from '@/assets/DataRobotLogo_black.svg';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -29,36 +31,42 @@ import { Link } from 'react-router-dom';
 import { useCurrentUser } from '@/api/auth/hooks';
 import { PATHS } from '@/constants/paths';
 import { ChatList } from '@/components/custom/chat-list';
-
-// Menu items.
-const items = [
-    {
-        title: 'Chat',
-        url: PATHS.CHAT,
-        icon: MessagesSquare,
-    },
-    {
-        title: 'Knowledge Bases',
-        url: ROUTES.KNOWLEDGE_BASES,
-        icon: BookOpenText,
-    },
-    // {
-    //     title: 'Assistants',
-    //     url: PATHS.CHAT,
-    //     icon: Brain,
-    // },
-    // {
-    //     title: 'Search',
-    //     url: PATHS.CHAT,
-    //     icon: Search,
-    // },
-];
+import { useTranslation } from '@/lib/i18n';
 
 export function AppSidebar() {
+    const { t } = useTranslation();
     const { open } = useSidebar();
     const { data: currentUser } = useCurrentUser();
     const navigate = useNavigate();
     const location = useLocation();
+    const { theme } = useTheme();
+
+    // Menu items.
+    const items = useMemo(
+        () => [
+            {
+                title: t('Chat'),
+                url: PATHS.CHAT,
+                icon: MessagesSquare,
+            },
+            {
+                title: t('Knowledge Bases'),
+                url: ROUTES.KNOWLEDGE_BASES,
+                icon: BookOpenText,
+            },
+            // {
+            //     title: t('Assistants'),
+            //     url: PATHS.CHAT,
+            //     icon: Brain,
+            // },
+            // {
+            //     title: t('Search'),
+            //     url: PATHS.CHAT,
+            //     icon: Search,
+            // },
+        ],
+        [t]
+    );
 
     const handleSettingsClick = () => {
         if (location.pathname.startsWith(PATHS.CHAT)) {
@@ -71,11 +79,15 @@ export function AppSidebar() {
         <Sidebar collapsible="icon" className="bg-background" data-testid="app-sidebar">
             <SidebarHeader className="h-15 border-b">
                 {open ? (
-                    <Link to={PATHS.CHAT} className="ml-2.5 py-3.5 inline-block">
-                        <img src={drLogo} alt="DataRobot" className="w-[130px]" />
+                    <Link to={PATHS.CHAT} className="flex items-center py-1">
+                        <img
+                            src={theme === 'dark' ? drLogoLight : drLogoDark}
+                            alt="DataRobot"
+                            className="w-[130px]"
+                        />
                     </Link>
                 ) : (
-                    <Link to={PATHS.CHAT} className="ml-2 py-3 inline-block">
+                    <Link to={PATHS.CHAT} className="ml-2 inline-block py-3">
                         <img src={drIcon} alt="DataRobot" className="w-[20px]" />
                     </Link>
                 )}
@@ -84,21 +96,15 @@ export function AppSidebar() {
                 <SidebarMenu>
                     <SidebarGroup className="gap-2">
                         {items.map(item => (
-                            <SidebarMenuItem
-                                key={item.title}
-                                className={cn(
-                                    'flex gap-2 pr-3 pl-2 py-2 rounded-l-none border-l-2 border-transparent overflow-hidden transition-colors cursor-pointer hover:bg-card',
-                                    {
-                                        'rounded-l-none border-l-2 border-white bg-card':
-                                            location.pathname === item.url ||
-                                            (item.url === ROUTES.KNOWLEDGE_BASES &&
-                                                location.pathname.startsWith(
-                                                    PATHS.KNOWLEDGE_BASES
-                                                )),
+                            <SidebarMenuItem key={item.title}>
+                                <SidebarMenuButton
+                                    asChild
+                                    isActive={
+                                        location.pathname === item.url ||
+                                        (item.url === ROUTES.KNOWLEDGE_BASES &&
+                                            location.pathname.startsWith(PATHS.KNOWLEDGE_BASES))
                                     }
-                                )}
-                            >
-                                <SidebarMenuButton asChild>
+                                >
                                     <Link to={item.url}>
                                         <item.icon />
                                         <span>{item.title}</span>
@@ -109,7 +115,7 @@ export function AppSidebar() {
                         <Separator className="my-4 border-t" />
                         {open && (
                             <>
-                                <p className="ml-1 text-base font-semibold">Chats</p>
+                                <p className="ml-1 text-base font-semibold">{t('Chats')}</p>
                                 <SidebarMenuItem>
                                     <SidebarMenuButton asChild>
                                         <ChatList />
@@ -123,7 +129,7 @@ export function AppSidebar() {
             <SidebarFooter>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <div className="h-9 flex w-full gap-1 ml-0.5 mb-2.5">
+                        <div className="mb-2.5 ml-0.5 flex h-9 w-full gap-1">
                             <Avatar>
                                 <AvatarFallback>
                                     {currentUser &&
@@ -138,7 +144,7 @@ export function AppSidebar() {
                             {open ? (
                                 <Button
                                     variant="ghost"
-                                    className="h-9 flex flex-1 w-full justify-between items-center gap-1 px-2 cursor-pointer hover:no-underline"
+                                    className="flex h-9 w-full flex-1 cursor-pointer items-center justify-between gap-1 px-2 hover:no-underline"
                                 >
                                     <span>
                                         {(() => {
@@ -147,13 +153,13 @@ export function AppSidebar() {
                                                 currentUser.first_name &&
                                                 currentUser.last_name
                                                     ? `${currentUser.first_name} ${currentUser.last_name}`
-                                                    : currentUser?.email || 'User';
+                                                    : currentUser?.email || t('User');
                                             return displayName.length > 20
                                                 ? `${displayName.slice(0, 20)}...`
                                                 : displayName;
                                         })()}
                                     </span>
-                                    <ChevronDown className="h-4 w-4" />
+                                    <ChevronDown className="size-4" />
                                 </Button>
                             ) : null}
                         </div>
@@ -163,7 +169,7 @@ export function AppSidebar() {
                             onSelect={handleSettingsClick}
                             data-testid="app-sidebar-settings-item"
                         >
-                            Settings
+                            {t('Settings')}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>

@@ -315,24 +315,18 @@ class TestMyAgentCrewAI:
             "environment_var": True,
         }
 
-        patches = []
-        for method in dir(MyAgent):
-            if method.startswith("task_"):
-                patches.append(patch.object(MyAgent, method).__enter__())
-
         with (
+            patch.object(
+                MyAgent, "build_crewai_workflow", return_value=mock_crew.return_value
+            ),
             patch(
                 "datarobot_genai.crewai.agent.create_pipeline_interactions_from_messages",
                 return_value=MultiTurnSample(user_input=events),
             ),
         ):
-            try:
-                response = chat(
-                    completion_create_params, load_model_result=load_model_result
-                )
-            finally:
-                for p in patches:
-                    p.__exit__()
+            response = chat(
+                completion_create_params, load_model_result=load_model_result
+            )
 
         # Assert results - check the pipeline_interactions - other sections of the
         # results are already being checked in test_custom_model.py::test_chat

@@ -57,6 +57,7 @@ EXCLUDE_PATTERNS = [
         r".*htmlcov/.*",
         r".*\.data/.*",
         r".*\.env",
+        r".*\.uv/.*",
     ]
 ]
 

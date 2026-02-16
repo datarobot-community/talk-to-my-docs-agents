@@ -6,4 +6,11 @@ export type SidebarContextProps = {
     setOpenMobile: (open: boolean) => void;
     isMobile: boolean;
     toggleSidebar: () => void;
+    sidebarWidth: number;
+    setSidebarWidth: (width: number) => void;
+    minWidth: number;
+    maxWidth: number;
+    isResizing: boolean;
+    setIsResizing: (isResizing: boolean) => void;
+    resizable: boolean;
 };

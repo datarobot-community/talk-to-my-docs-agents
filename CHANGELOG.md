@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.5.2] - 2026-02-13
+
+### Added
+
+- Real-time agent task progress: stream crew execution events to UI
+- ESLint rules for Tailwind
+
+### Changed
+
+- Theme changed to match corporate DataRobot design. This includes colors, fonts, paddings, and typography. Reusable shadcn components from `@dr-ui` registry are installed.
+- OAuth provider tiles: add status and an Edit button, which allows selecting another account.
+
+### Fixed
+
+- Fix the case when the user revoked access to an OAuth provider.
+- Crew initialization.
+
 ## [11.5.0] - 2026-01-21
 
 ### Added

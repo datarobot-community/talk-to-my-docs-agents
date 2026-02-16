@@ -13,6 +13,7 @@
 # limitations under the License.
 import logging
 
+from datarobot.auth.datarobot.exceptions import OAuthServiceError
 from datarobot.auth.identity import Identity as IdentityData
 from datarobot.auth.oauth import AsyncOAuthComponent, OAuthToken
 
@@ -74,16 +75,30 @@ class Tokens:
 
         logger.info("found expired access token, refreshing", extra=ctx)
 
-        token_data = await self._oauth.refresh_access_token(
-            provider_id=identity_model.provider_id,
-            identity_id=identity_model.provider_identity_id,
-            refresh_token=identity_model.refresh_token,
-            scope=scope,
-        )
+        try:
+            token_data = await self._oauth.refresh_access_token(
+                provider_id=identity_model.provider_id,
+                identity_id=identity_model.provider_identity_id,
+                refresh_token=identity_model.refresh_token,
+                scope=scope,
+            )
+        except OAuthServiceError as e:
+            # Mark identity as needing re-authorization
+            if identity_model.id:
+                logger.warning(
+                    "Token refresh failed, marking identity as needs_reauth",
+                    extra={**ctx, "error": str(e)},
+                )
+                await self._identity_repo.update_identity(
+                    identity_id=identity_model.id,
+                    update=IdentityUpdate(needs_reauth=True),
+                )
+            raise
 
         update = IdentityUpdate(
             access_token=token_data.access_token,
             access_token_expires_at=token_data.expires_at,
+            needs_reauth=False,  # Clear the flag on successful refresh
         )
 
         if token_data.refresh_token:

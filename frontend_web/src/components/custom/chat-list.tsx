@@ -3,11 +3,13 @@ import { Link, useLocation } from 'react-router-dom';
 import { useChats } from '@/api/chat/hooks';
 import { SidebarMenuButton, SidebarMenu, SidebarMenuItem } from '@/components/ui/sidebar';
 import { Spinner } from '@/components/ui/spinner.tsx';
-import { cn, getChatNameOrDefaultWithTimestamp } from '@/lib/utils.ts';
+import { getChatNameOrDefaultWithTimestamp } from '@/lib/utils.ts';
 import { ChatActionMenu } from '@/components/custom/chat-action-menu.tsx';
 import { TruncatedWithTooltip } from '@/components/custom/truncated-with-tooltip.tsx';
+import { useTranslation } from '@/lib/i18n';
 
 export const ChatList: React.FC = () => {
+    const { t } = useTranslation();
     const { data: chats = [], isLoading } = useChats();
     const sortLatestUpdated = useMemo(() => {
         return [...chats].sort(
@@ -18,8 +20,8 @@ export const ChatList: React.FC = () => {
     const location = useLocation();
     if (isLoading) {
         return (
-            <div className="flex flex-row gap-1 text-sm items-center pt-2">
-                <Spinner size="small" /> Loading chats...
+            <div className="flex flex-row items-center gap-1 body pt-2">
+                <Spinner className="size-6" /> {t('Loading chats...')}
             </div>
         );
     }
@@ -27,26 +29,17 @@ export const ChatList: React.FC = () => {
     return (
         <SidebarMenu className="mx-0 justify-items-center">
             {sortLatestUpdated.map(chat => (
-                <SidebarMenuItem
-                    key={chat.uuid}
-                    className={cn(
-                        'flex gap-2 pr-0 py-2 items-center rounded border-l-2 border-transparent overflow-hidden transition-colors cursor-pointer [&_*]:cursor-inherit hover:bg-card',
-                        {
-                            'rounded-l-none dark:bg-card border-l-2 border-white':
-                                location.pathname === `/chat/${chat.uuid}`,
-                        }
-                    )}
-                >
+                <SidebarMenuItem key={chat.uuid}>
                     <SidebarMenuButton
                         asChild
                         isActive={location.pathname === `/chat/${chat.uuid}`}
                     >
                         {/*Need this div as SidebarMenuButton does not allow fragments*/}
-                        <div className="px-0 py-0">
+                        <div className="p-0">
                             <Link
                                 to={`/chat/${chat.uuid}`}
                                 aria-label={getChatNameOrDefaultWithTimestamp(chat)}
-                                className="ml-2 flex-grow-1"
+                                className="ml-2 grow"
                                 data-testid={`chat-link-${chat.uuid}`}
                             >
                                 <TruncatedWithTooltip

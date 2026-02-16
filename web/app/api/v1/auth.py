@@ -13,7 +13,9 @@
 # limitations under the License.
 import logging
 import uuid
+from typing import Any
 
+from datarobot.auth.datarobot.exceptions import OAuthServiceError
 from datarobot.auth.oauth import (
     OAuthData,
     OAuthProvider,
@@ -56,6 +58,7 @@ class IdentitySchema(BaseModel):
     provider_type: str
     provider_user_id: str
     provider_identity_id: str | None = None
+    needs_reauth: bool = False
 
     @classmethod
     def from_identity(cls, identity: Identity) -> "IdentitySchema":
@@ -66,6 +69,7 @@ class IdentitySchema(BaseModel):
             provider_type=identity.provider_type,
             provider_user_id=identity.provider_user_id,
             provider_identity_id=identity.provider_identity_id,
+            needs_reauth=identity.needs_reauth,
         )
 
 
@@ -242,17 +246,27 @@ async def oauth_callback(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err.model_dump()
         )
 
-    token_data_update = {}
+    token_data_update: dict[str, Any] = {}
 
     if token_data:
         token_data_update = {
             "access_token": token_data.access_token,
             "refresh_token": token_data.refresh_token,
-            "expires_at": token_data.expires_at,
+            "access_token_expires_at": token_data.expires_at,
+        }
+    elif auth_ctx:
+        # Re-authentication flow: token_data is None (managed by external OAuth service)
+        # We must clear local cached tokens to force a fresh fetch from the OAuth service
+        # Otherwise, the old (potentially revoked) token will continue to be used
+        token_data_update = {
+            "access_token": None,
+            "refresh_token": None,
+            "access_token_expires_at": None,
         }
 
     identity_update = IdentityUpdate(
         provider_identity_id=oauth_data.authorization_id,
+        needs_reauth=False,  # Clear the flag on successful re-authorization
         **token_data_update,
     )
 
@@ -267,6 +281,7 @@ async def oauth_callback(
             provider_type=oauth_data.provider.type,
             provider_user_id=user_profile.id,
             update=identity_update,
+            update_none_values=True,
         )
 
         logger.info(
@@ -345,6 +360,21 @@ async def oauth_callback(
 
         return UserSchema.from_user(user)
 
+    # Update the existing identity with new tokens and clear needs_reauth flag
+    identity = await identity_repo.upsert_identity(
+        auth_type=AuthSchema.OAUTH2,
+        user_id=identity.user_id,
+        provider_id=oauth_data.provider.id,
+        provider_type=oauth_data.provider.type,
+        provider_user_id=user_profile.id,
+        update=identity_update,
+    )
+
+    logger.info(
+        "updated identity for returning user",
+        extra={"identity": identity, "user_id": identity.user_id},
+    )
+
     user = await user_repo.get_user(user_id=identity.user_id)
     request.session[AUTH_SESS_KEY] = user.to_auth_ctx().model_dump()
 
@@ -407,7 +437,24 @@ async def get_token(
         },
     )
 
-    token_data = await oauth_tokens.get_access_token(identity, payload.scope)
+    try:
+        token_data = await oauth_tokens.get_access_token(identity, payload.scope)
+    except OAuthServiceError as e:
+        logger.warning(
+            "OAuth token refresh failed - user may need to re-authorize",
+            extra={
+                "identity_id": payload.identity_id,
+                "provider_type": identity.provider_type,
+                "error": str(e),
+            },
+        )
+        err = ErrorSchema(
+            code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+            message=f"The OAuth connection for {identity.provider_type} has expired or been revoked. Please reconnect the account.",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+        )
 
     return token_data
 

@@ -8,17 +8,20 @@ import {
 import { Button } from '@/components/ui/button.tsx';
 import { EllipsisVertical, Trash } from 'lucide-react';
 import { FileSchema } from '@/api/knowledge-bases/types.ts';
+import { useTranslation } from '@/lib/i18n';
 
 export function FileActionMenu({
     file,
     onDelete,
-    ariaLabel = 'File actions',
+    ariaLabel: defaultAriaLabel,
 }: {
     file: FileSchema;
     onDelete: (file: FileSchema) => void;
     ariaLabel?: string;
 }) {
+    const { t } = useTranslation();
     const [open, setOpen] = useState(false);
+    const ariaLabel = defaultAriaLabel || t('File actions');
 
     const handleOnDelete = useCallback(
         (file: FileSchema) => {
@@ -32,7 +35,7 @@ export function FileActionMenu({
         <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
                 <Button
-                    className="justify-self-end cursor-pointer"
+                    className="justify-self-end"
                     variant="ghost"
                     size="icon"
                     onClick={() => true}
@@ -42,12 +45,9 @@ export function FileActionMenu({
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                    onClick={() => handleOnDelete(file)}
-                    className="cursor-pointer text-red-400 hover:text-red-300 hover:bg-gray-700"
-                >
+                <DropdownMenuItem onClick={() => handleOnDelete(file)} variant="destructive">
                     <Trash />
-                    Delete
+                    {t('Delete')}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

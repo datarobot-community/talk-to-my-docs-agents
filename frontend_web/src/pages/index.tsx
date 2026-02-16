@@ -6,7 +6,7 @@ const Pages = () => {
     const routing = useRoutes(appRoutes);
     return (
         <Suspense
-            fallback={<div className="flex items-center justify-center h-full">Loading...</div>}
+            fallback={<div className="flex h-full items-center justify-center">Loading...</div>}
         >
             {routing}
         </Suspense>

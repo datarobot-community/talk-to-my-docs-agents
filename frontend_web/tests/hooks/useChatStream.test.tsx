@@ -89,4 +89,80 @@ describe('useChatStream tests', () => {
 
         expect(closeSpy).toHaveBeenCalled();
     });
+
+    it('should handle task_progress events and update message task_outputs', async () => {
+        const chatId = 'test-chat';
+        // Pre-populate with an in-progress assistant message
+        queryClient.setQueryData(
+            ['chats', chatId],
+            [{ uuid: 'msg-1', role: 'assistant', in_progress: true, task_outputs: [] }]
+        );
+
+        renderHook(() => useChatStream(chatId), { wrapper });
+
+        const stream = localEventSourceInstances[0];
+
+        // Simulate task_started event
+        await act(async () => {
+            stream.simulateMessage({
+                type: 'task_progress',
+                data: { type: 'task_started', task_name: 'Search', agent_name: 'FileAgent' },
+            });
+        });
+
+        await waitFor(() => {
+            const messages = queryClient.getQueryData<{ task_outputs: unknown[] }[]>([
+                'chats',
+                chatId,
+            ]);
+            expect(messages?.[0].task_outputs).toHaveLength(1);
+            expect(messages?.[0].task_outputs[0]).toMatchObject({
+                task_name: 'Search',
+                agent_name: 'FileAgent',
+                status: 'in_progress',
+            });
+        });
+
+        // Simulate task_completed event
+        await act(async () => {
+            stream.simulateMessage({
+                type: 'task_progress',
+                data: { type: 'task_completed', task_name: 'Search', agent_name: 'FileAgent' },
+            });
+        });
+
+        await waitFor(() => {
+            const messages = queryClient.getQueryData<{ task_outputs: unknown[] }[]>([
+                'chats',
+                chatId,
+            ]);
+            expect(messages?.[0].task_outputs[0]).toMatchObject({ status: 'completed' });
+        });
+    });
+
+    it('should reset polling fallback when browser comes online', async () => {
+        const chatId = 'test-chat';
+        const { result } = renderHook(() => useChatStream(chatId), { wrapper });
+
+        // First trigger polling fallback via errors
+        const stream = localEventSourceInstances[0];
+        await act(async () => {
+            for (let i = 0; i < 10; i++) {
+                stream.onerror?.(new Event('error'));
+            }
+        });
+
+        await waitFor(() => {
+            expect(result.current.isPollingFallbackActive).toBe(true);
+        });
+
+        // Simulate browser coming back online
+        await act(async () => {
+            window.dispatchEvent(new Event('online'));
+        });
+
+        await waitFor(() => {
+            expect(result.current.isPollingFallbackActive).toBe(false);
+        });
+    });
 });

@@ -13,10 +13,10 @@
 # limitations under the License.
 from typing import Sequence
 
-from core.telemetry.logging import FormatType, LogLevel
 from datarobot.core.config import DataRobotAppFrameworkBaseSettings
 
 from app.auth.oauth import OAuthImpl
+from app.telemetry import FormatType, LogLevel
 
 
 class Config(DataRobotAppFrameworkBaseSettings):

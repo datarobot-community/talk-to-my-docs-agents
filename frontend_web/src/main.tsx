@@ -22,6 +22,7 @@ import { getBaseUrl } from '@/lib/utils.ts';
 
 import './index.css';
 import App from './App.tsx';
+import { ThemeProvider } from './theme/theme-provider.tsx';
 
 const queryClient = new QueryClient();
 const basename = getBaseUrl();
@@ -31,7 +32,9 @@ createRoot(document.getElementById('root')!).render(
         <QueryClientProvider client={queryClient}>
             <Router basename={basename}>
                 <AppStateProvider>
-                    <App />
+                    <ThemeProvider>
+                        <App />
+                    </ThemeProvider>
                 </AppStateProvider>
             </Router>
         </QueryClientProvider>

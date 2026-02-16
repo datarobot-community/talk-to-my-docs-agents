@@ -1,5 +1,11 @@
 import { KnowledgeBaseSchema } from '@/api/knowledge-bases/types';
 
+export interface ITaskOutput {
+    task_name: string;
+    agent_name: string;
+    status: 'in_progress' | 'completed';
+}
+
 export interface IChatMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -10,6 +16,7 @@ export interface IChatMessage {
     in_progress?: boolean;
     model?: string;
     uuid?: string;
+    task_outputs?: ITaskOutput[];
 }
 
 export interface IUserMessage {

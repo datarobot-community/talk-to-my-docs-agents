@@ -1,8 +1,8 @@
-import { IChatMessage } from '@/api/chat/types.ts';
+import { IChatMessage, ITaskOutput } from '@/api/chat/types.ts';
 import { cn, unwrapMarkdownCodeBlock } from '@/lib/utils.ts';
 import { Avatar, AvatarImage } from '@/components/ui/avatar.tsx';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircleIcon } from 'lucide-react';
+import { Alert, AlertTitle } from '@/components/ui/alert';
+import { AlertCircleIcon, CheckCircle2, Loader2 } from 'lucide-react';
 import drIcon from '@/assets/DataRobotLogo_black.svg';
 import { useAppState } from '@/state';
 import { MARKDOWN_COMPONENTS } from '@/constants/markdown';
@@ -10,6 +10,27 @@ import { DotPulseLoader } from '@/components/custom/dot-pulse-loader';
 import { MarkdownHooks } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeMermaid from 'rehype-mermaid';
+import { useTranslation } from '@/lib/i18n';
+
+function TaskProgressList({ taskOutputs }: { taskOutputs: ITaskOutput[] }) {
+    return (
+        <div className="mt-2 flex w-fit flex-col gap-1 rounded-md bg-card p-4">
+            {taskOutputs.map((task, idx) => (
+                <div key={idx} className="flex items-center gap-2 text-sm">
+                    {task.status === 'completed' ? (
+                        <CheckCircle2 className="size-4 shrink-0 text-secondary-foreground" />
+                    ) : (
+                        <Loader2 className="size-4 shrink-0 animate-spin text-secondary-foreground" />
+                    )}
+                    {/* TODO: i18n - decide translation strategy for agent/task names when implementing internationalization */}
+                    <span className="text-secondary-foreground">
+                        {task.agent_name}: {task.task_name}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
 
 export function ChatResponseMessage({
     classNames,
@@ -18,12 +39,13 @@ export function ChatResponseMessage({
     classNames?: string;
     message: IChatMessage;
 }) {
+    const { t } = useTranslation();
     const { availableLlmModels } = useAppState();
     const messageLlmModel =
         message && availableLlmModels?.find(({ model }) => model === message.model);
     return (
         <div className="my-3 py-3" data-testid="chat-response-message">
-            <div className={cn('w-2xl px-3 flex gap-2 items-center', classNames)}>
+            <div className={cn('flex w-2xl items-center gap-2 px-3', classNames)}>
                 <Avatar>
                     <AvatarImage src={drIcon} alt="LLM" />
                 </Avatar>
@@ -31,17 +53,19 @@ export function ChatResponseMessage({
             </div>
             <div className="w-full">
                 {message.in_progress ? (
-                    <div className="mt-2 bg-card p-4 w-fit rounded-md">
-                        <DotPulseLoader />
-                    </div>
+                    message.task_outputs && message.task_outputs.length > 0 ? (
+                        <TaskProgressList taskOutputs={message.task_outputs} />
+                    ) : (
+                        <div className="mt-2 w-fit rounded-md bg-card p-4">
+                            <DotPulseLoader />
+                        </div>
+                    )
                 ) : (
-                    <div className="p-2 w-fit">
+                    <div className="w-fit p-2">
                         {message.error ? (
-                            <Alert variant="destructive" className="">
+                            <Alert variant="destructive">
                                 <AlertCircleIcon />
-                                <AlertDescription>
-                                    <p>{message.error}</p>
-                                </AlertDescription>
+                                <AlertTitle>{message.error}</AlertTitle>
                             </Alert>
                         ) : (
                             <MarkdownHooks
@@ -57,12 +81,12 @@ export function ChatResponseMessage({
                                         },
                                     ],
                                 ]}
-                                fallback={<div>Processing markdown...</div>}
+                                fallback={<div>{t('Processing markdown...')}</div>}
                                 components={MARKDOWN_COMPONENTS}
                             >
                                 {message
                                     ? unwrapMarkdownCodeBlock(message.content)
-                                    : 'Message not available'}
+                                    : t('Message not available')}
                             </MarkdownHooks>
                         )}
                     </div>

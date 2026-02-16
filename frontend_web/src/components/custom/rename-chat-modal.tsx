@@ -13,8 +13,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppState } from '@/state';
 import { getChatNameOrDefaultWithTimestamp } from '@/lib/utils';
 import { useChats, useChatsRename } from '@/api/chat/hooks.ts';
+import { useTranslation } from '@/lib/i18n';
 
 export const RenameChatModal = () => {
+    const { t } = useTranslation();
     const [name, setName] = useState<string>('');
     const [isComposing, setIsComposing] = useState(false);
     const { showRenameChatModalForId, setShowRenameChatModalForId } = useAppState();
@@ -41,22 +43,22 @@ export const RenameChatModal = () => {
         <Dialog defaultOpen={false} open={!!chat} onOpenChange={handleXButton}>
             <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
-                    <DialogTitle>Rename Chat</DialogTitle>
+                    <DialogTitle>{t('Rename Chat')}</DialogTitle>
                 </DialogHeader>
                 <DialogDescription>
-                    Enter a new name for your chat in the field below.
+                    {t('Enter a new name for your chat in the field below.')}
                 </DialogDescription>
                 <div className="grid gap-4 py-4">
                     <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="name" className="text-right">
-                            Name
+                            {t('Name')}
                         </Label>
                         <Input
                             id="name"
                             value={name}
                             onChange={event => setName(event.target.value)}
                             className="col-span-3"
-                            placeholder="Enter a name for your chat"
+                            placeholder={t('Enter a name for your chat')}
                             disabled={isPending}
                             onCompositionStart={() => setIsComposing(true)}
                             onCompositionEnd={() => setIsComposing(false)}
@@ -83,7 +85,7 @@ export const RenameChatModal = () => {
                             setShowRenameChatModalForId(null);
                         }}
                     >
-                        Cancel
+                        {t('Cancel')}
                     </Button>
                     <Button
                         onClick={() => {
@@ -100,7 +102,7 @@ export const RenameChatModal = () => {
                         }}
                         disabled={isPending || !name.trim()}
                     >
-                        {isPending ? 'Renaming...' : 'Rename'}
+                        {isPending ? t('Renaming...') : t('Rename')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

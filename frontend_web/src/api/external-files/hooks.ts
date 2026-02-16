@@ -7,8 +7,10 @@ import { IIdentity } from '@/api/auth/types';
 import { FileSchema } from '../knowledge-bases/types';
 import { knowledgeBasesKeys } from '../knowledge-bases/keys';
 import { AxiosError } from 'axios';
+import { authKeys } from '../auth/hooks';
 
 export const useGoogleFiles = (folderId?: string, enabled: boolean = true) => {
+    const queryClient = useQueryClient();
     return useQuery({
         queryKey: externalFilesKeys.googleFolder(folderId),
         queryFn: () => getGoogleFiles(folderId),
@@ -18,6 +20,7 @@ export const useGoogleFiles = (folderId?: string, enabled: boolean = true) => {
             if (error && typeof error === 'object' && 'response' in error) {
                 const axiosError = error as AxiosError;
                 if (axiosError.response?.status === 401 || axiosError.response?.status === 403) {
+                    queryClient.invalidateQueries({ queryKey: authKeys.currentUser });
                     return false;
                 }
             }
@@ -29,6 +32,7 @@ export const useGoogleFiles = (folderId?: string, enabled: boolean = true) => {
 };
 
 export const useBoxFiles = (folderId: string = '0', enabled: boolean = true) => {
+    const queryClient = useQueryClient();
     return useQuery({
         queryKey: externalFilesKeys.boxFolder(folderId),
         queryFn: () => getBoxFiles(folderId),
@@ -38,6 +42,7 @@ export const useBoxFiles = (folderId: string = '0', enabled: boolean = true) => 
             if (error && typeof error === 'object' && 'response' in error) {
                 const axiosError = error as AxiosError;
                 if (axiosError.response?.status === 401 || axiosError.response?.status === 403) {
+                    queryClient.invalidateQueries({ queryKey: authKeys.currentUser });
                     return false;
                 }
             }

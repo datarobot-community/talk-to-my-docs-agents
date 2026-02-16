@@ -4,6 +4,7 @@ export interface IIdentity {
     provider_type: string;
     provider_user_id: string;
     provider_identity_id?: string | null;
+    needs_reauth?: boolean;
 }
 
 export interface IUser {

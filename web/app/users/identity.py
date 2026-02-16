@@ -102,6 +102,11 @@ class Identity(SQLModel, table=True):
         description="The DataRobot tenant ID associated with the connection",
     )
 
+    needs_reauth: bool = Field(
+        default=False,
+        description="Whether the connection needs re-authorization (e.g., tokens were revoked)",
+    )
+
     def access_token_expired(self, leeway_secs: int | None = None) -> bool:
         if self.access_token_expires_at is None:
             return False
@@ -137,6 +142,8 @@ class IdentityUpdate(SQLModel):
 
     datarobot_org_id: str | None = None
     datarobot_tenant_id: str | None = None
+
+    needs_reauth: bool | None = None
 
 
 class IdentityCreate(IdentityUpdate):
@@ -232,6 +239,7 @@ class IdentityRepository:
         provider_type: str,
         provider_user_id: str,
         update: IdentityUpdate | None = None,
+        update_none_values: bool = False,
     ) -> Identity:
         """
         Upsert a connection in the database.
@@ -276,7 +284,7 @@ class IdentityRepository:
 
                 if update:
                     for field, value in update.model_dump(exclude_unset=True).items():
-                        if value is not None:
+                        if value is not None or update_none_values:
                             setattr(identity, field, value)
 
                 sess.add(identity)

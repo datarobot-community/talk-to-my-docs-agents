@@ -1,16 +1,20 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { useOauthProviders, useAuthorizeProvider } from '@/api/oauth/hooks';
 import { useCurrentUser } from '@/api/auth/hooks';
 import { getBaseUrl } from '@/lib/utils.ts';
-import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { PATHS } from '@/constants/paths';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Heading } from '@/components/ui/heading';
+import { useTranslation } from '@/lib/i18n';
+import { ProviderTile, ProviderStatus } from '@/components/custom/provider-tile';
+import { IOAuthProvider } from '@/api/oauth/types';
 
 export const SettingsSources = () => {
+    const { t } = useTranslation();
     const {
         data: providers = [],
         isLoading,
@@ -24,6 +28,17 @@ export const SettingsSources = () => {
         if (currentUser?.identities) {
             return new Set(currentUser.identities.map(id => id.provider_id));
         }
+        return new Set<string>();
+    }, [currentUser?.identities]);
+
+    // Track which identities need re-authorization
+    const needsReauthIds = useMemo(() => {
+        if (currentUser?.identities) {
+            return new Set(
+                currentUser.identities.filter(id => id.needs_reauth).map(id => id.provider_id)
+            );
+        }
+        return new Set<string>();
     }, [currentUser?.identities]);
 
     let baseUrl = getBaseUrl();
@@ -47,25 +62,72 @@ export const SettingsSources = () => {
         }
     }, [location, navigate]);
 
+    const getProviderStatus = (provider: IOAuthProvider): ProviderStatus => {
+        const isConnected = connectedIds.has(provider.id);
+        if (!isConnected) return 'disconnected';
+        // Check if user's identity needs re-authorization (e.g., tokens were revoked)
+        if (needsReauthIds.has(provider.id)) {
+            return 'warning';
+        }
+        // Check if provider has a warning status
+        if (provider.status === 'warning' || provider.status === 'error') {
+            return 'warning';
+        }
+        return 'connected';
+    };
+
+    const handleConnect = (providerId: string) => {
+        setConnectingId(providerId);
+        authorizeProvider(
+            {
+                providerId,
+                redirect_uri: redirectUri,
+            },
+            {
+                onSuccess: ({ redirect_url }) => {
+                    window.location.href = redirect_url;
+                },
+                onError: () => {
+                    setConnectingId(null);
+                },
+            }
+        );
+    };
+
+    const handleEdit = (providerId: string) => {
+        // For now, reconnecting is the edit action
+        handleConnect(providerId);
+    };
+
     return (
-        <ScrollArea className="flex-1 p-8">
-            <h2 className="text-xl font-semibold mb-6">Connected sources</h2>
+        <ScrollArea className="flex-1">
+            {/* Data connections header */}
+            <div className="mb-6 border-b border-border pb-2">
+                <Heading level={4}>{t('Data connections')}</Heading>
+            </div>
+
             {oauthError && (
                 <Alert variant="destructive" className="mb-6">
-                    <AlertCircle className="h-4 w-4" />
+                    <AlertCircle className="size-4" />
                     <AlertDescription>
                         <div>
-                            <p className="font-medium mb-1">Failed to connect to OAuth provider</p>
+                            <p className="mb-1 font-medium">
+                                {t('Failed to connect to OAuth provider')}
+                            </p>
                             {oauthError.message &&
                             oauthError.message !== 'OAuth connection failed' ? (
                                 <p className="text-sm">
                                     {typeof oauthError.message === 'string'
                                         ? oauthError.message
-                                        : 'Please try again or contact support if the problem persists.'}
+                                        : t(
+                                              'Please try again or contact support if the problem persists.'
+                                          )}
                                 </p>
                             ) : (
                                 <p className="text-sm">
-                                    Please try again or contact support if the problem persists.
+                                    {t(
+                                        'Please try again or contact support if the problem persists.'
+                                    )}
                                 </p>
                             )}
                         </div>
@@ -74,64 +136,32 @@ export const SettingsSources = () => {
             )}
 
             {isLoading && (
-                <div className="space-y-4">
-                    <Skeleton key={0} className="h-20 w-full rounded-md" />
-                    <Skeleton key={1} className="h-20 w-full rounded-md" />
-                    <Skeleton key={2} className="h-20 w-full rounded-md" />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <Skeleton className="h-40 w-full rounded-lg" />
+                    <Skeleton className="h-40 w-full rounded-lg" />
+                    <Skeleton className="h-40 w-full rounded-lg" />
                 </div>
             )}
 
             {isErrorFetchingProviders && (
-                <p className="text-destructive">Failed to load connected sources.</p>
+                <p className="text-destructive">{t('Failed to load connected sources.')}</p>
             )}
 
             {!isLoading && !isErrorFetchingProviders && providers.length === 0 && (
-                <p className="text-muted-foreground">No sources available.</p>
+                <p className="text-muted-foreground">{t('No sources available.')}</p>
             )}
 
             {!isLoading && providers.length > 0 && (
-                <div className="divide-y divide-border">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {providers.map(provider => (
-                        <div key={provider.id} className="flex items-center justify-between py-4">
-                            <div>
-                                <p className="font-medium">
-                                    {provider.type
-                                        ? provider.type.charAt(0).toUpperCase() +
-                                          provider.type.slice(1)
-                                        : provider.name || provider.id}
-                                </p>
-                                {/* placeholder description */}
-                            </div>
-                            {connectedIds?.has(provider.id) ? (
-                                <span className="flex items-center gap-1 text-green-500 font-medium">
-                                    <CheckCircle2 className="w-4 h-4" /> Connected
-                                </span>
-                            ) : (
-                                <Button
-                                    variant="outline"
-                                    disabled={isPending && connectingId === provider.id}
-                                    onClick={() => {
-                                        setConnectingId(provider.id);
-                                        authorizeProvider(
-                                            {
-                                                providerId: provider.id,
-                                                redirect_uri: redirectUri,
-                                            },
-                                            {
-                                                onSuccess: ({ redirect_url }) => {
-                                                    window.location.href = redirect_url;
-                                                },
-                                                onError: () => {
-                                                    setConnectingId(null);
-                                                },
-                                            }
-                                        );
-                                    }}
-                                >
-                                    Connect
-                                </Button>
-                            )}
-                        </div>
+                        <ProviderTile
+                            key={provider.id}
+                            type={provider.type}
+                            status={getProviderStatus(provider)}
+                            onConnect={() => handleConnect(provider.id)}
+                            onEdit={() => handleEdit(provider.id)}
+                            isConnecting={isPending && connectingId === provider.id}
+                        />
                     ))}
                 </div>
             )}

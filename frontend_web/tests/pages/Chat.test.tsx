@@ -42,7 +42,7 @@ describe('Page: Chat', () => {
                 model: 'ttmdocs-agents',
                 chat_id: undefined,
                 knowledge_base: undefined,
-                type: 'message'
+                type: 'message',
             },
             { signal: undefined }
         );

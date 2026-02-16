@@ -78,7 +78,7 @@ tasks:
     desc: "🚀 Run all services together"
     cmds:
       - |
-        task web:dev-agent &
+        task web:dev &
         sleep 5
         task agent_retrieval_agent:dev &
         sleep 3

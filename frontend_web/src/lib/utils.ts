@@ -1,99 +1,78 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { VITE_STATIC_DEFAULT_PORT, VITE_DEFAULT_PORT } from '@/constants/dev';
-import { IChat } from '@/api/chat/types.ts';
+export * from './ttmdocs-utils';
+
+const ROOT_FONT_SIZE = 14;
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-export function getApiPort() {
-    return window.ENV?.API_PORT || VITE_STATIC_DEFAULT_PORT;
+function toFixed(number: number, precision: number) {
+    const multiplier = Math.pow(10, precision + 1),
+        wholeNumber = Math.floor(number * multiplier);
+    return (Math.round(wholeNumber / 10) * 10) / multiplier;
 }
 
-export function getBaseUrl() {
-    let basename = window.ENV?.BASE_PATH;
-    // Adjust API URL based on the environment
-    const pathname: string = window.location.pathname;
-
-    if (pathname?.includes('notebook-sessions') && pathname?.includes(`/${VITE_DEFAULT_PORT}/`)) {
-        // ex:. /notebook-sessions/{id}/ports/5137/
-        basename = import.meta.env.BASE_URL;
+export function pxToRem(
+    px: number | string,
+    rootValue: number = ROOT_FONT_SIZE,
+    unitPrecision: number = 5,
+    minPixelValue: number = 0.01
+): string {
+    if (!px) {
+        return '';
     }
-
-    return basename ? basename : '/';
+    const pixels = typeof px === 'string' ? parseFloat(px) : (px as number);
+    if (pixels < minPixelValue) {
+        return typeof px === 'string' ? px : `${px}px`;
+    }
+    const fixedVal = toFixed(pixels / rootValue, unitPrecision);
+    return fixedVal + 'rem';
 }
 
-export function getApiUrl() {
-    return `${window.location.origin}${getBaseUrl()}api`;
+export function remToPx(
+    rem: number | string,
+    rootValue: number = ROOT_FONT_SIZE,
+    unitPrecision: number = 5
+): number {
+    if (!rem) {
+        return 0;
+    }
+    const value = typeof rem === 'string' ? parseFloat(rem) : (rem as number);
+    const fixedVal = toFixed(value * rootValue, unitPrecision);
+    return fixedVal;
 }
 
-export function unwrapMarkdownCodeBlock(message: string): string {
-    return message.replace(/```(?:markdown)?\s*/g, '\n').replace(/<think>[\s\S]*?<\/think>/g, '');
+function getCookieValue(name: string): string | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+    const cookies = document.cookie.split('; ');
+    for (const cookie of cookies) {
+        const separatorIndex = cookie.indexOf('=');
+        if (separatorIndex === -1) {
+            continue;
+        }
+        const key = cookie.slice(0, separatorIndex);
+        if (key === name) {
+            return cookie.slice(separatorIndex + 1);
+        }
+    }
+    return null;
 }
 
-const DEFAULT_CHAT_NAME = 'New Chat';
-export const getChatNameOrDefaultWithTimestamp = (chat: IChat) => {
-    const chatName = chat.name || DEFAULT_CHAT_NAME;
-    if (chatName === DEFAULT_CHAT_NAME) {
-        const date = chat.created_at
-            ? new Date(
-                  chat.created_at.endsWith('Z') || chat.created_at.endsWith('+00:00')
-                      ? chat.created_at
-                      : chat.created_at + 'Z'
-              )
-            : new Date();
-        const formattedDate = new Intl.DateTimeFormat('en', {
-            month: 'long',
-            day: 'numeric',
-        }).format(date);
-        const formattedTime = new Intl.DateTimeFormat('en', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-        }).format(date);
-        return `Chat ${formattedDate} ${formattedTime}`;
-    }
-    return chatName;
-};
-
-export function formatFileSize(bytes: number): string {
-    if (bytes >= 1024 * 1024) {
-        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-    } else if (bytes >= 1024) {
-        return (bytes / 1024).toFixed(0) + ' KB';
-    } else {
-        return bytes + ' bytes';
-    }
+export function getCookieBoolean(name: string, fallback: boolean): boolean {
+    const value = getCookieValue(name);
+    return value ? value === 'true' : fallback;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const extractText = (element: any): string => {
-    if (typeof element === 'string') return element;
-    if (Array.isArray(element)) return element.map(extractText).join('');
-    if (element && typeof element === 'object' && element.props) {
-        return extractText(element.props.children);
-    }
-    return '';
-};
+export function getCookieNumber(name: string, fallback: number): number {
+    const value = getCookieValue(name);
+    return value ? parseFloat(value) : fallback;
+}
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const isSuggestedPrompt = (element: any): boolean => {
-    if (element && typeof element === 'object' && element.type === 'strong') {
-        const strongText = extractText(element.props.children);
-        return strongText === 'SUGGESTION:';
-    }
-
-    // Also check if the element itself contains "SUGGESTION:" text
-    if (element && typeof element === 'string') {
-        return element.includes('SUGGESTION:');
-    }
-
-    // Check if it's a React element with children that contain "SUGGESTION:"
-    if (element && typeof element === 'object' && element.props && element.props.children) {
-        const text = extractText(element.props.children);
-        return text.includes('SUGGESTION:');
-    }
-
-    return false;
-};
+export function getCookieString(name: string, fallback: string): string {
+    const value = getCookieValue(name);
+    return value || fallback;
+}

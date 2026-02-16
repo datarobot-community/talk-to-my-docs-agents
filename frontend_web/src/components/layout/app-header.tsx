@@ -16,8 +16,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { Search, ChevronLeft } from 'lucide-react';
 import { useIsMobile } from '@/hooks';
+import { useTranslation } from '@/lib/i18n';
 
 export function AppHeader() {
+    const { t } = useTranslation();
     const { selectedLlmModel, setSelectedLlmModel, availableLlmModels } = useAppState();
     const location = useLocation();
     const navigate = useNavigate();
@@ -34,8 +36,12 @@ export function AppHeader() {
     const shouldShowGoToKbButton =
         location.pathname.startsWith(PATHS.KNOWLEDGE_BASES) &&
         location.pathname !== PATHS.KNOWLEDGE_BASES;
+    const shouldShowHeader = !location.pathname.startsWith(PATHS.SETTINGS.ROOT);
+    if (!shouldShowHeader) {
+        return null;
+    }
     return (
-        <header className="h-16 px-4 flex items-center justify-between" data-testid="app-header">
+        <header className="flex h-16 items-center justify-between px-4" data-testid="app-header">
             <div className="flex gap-1">
                 {isMobile && <SidebarTrigger className="h-9" />}
                 {shouldShowLLMSelector && (
@@ -46,36 +52,38 @@ export function AppHeader() {
                                 className="h-9 cursor-pointer hover:no-underline"
                             >
                                 <span>{selectedLlmModel.name}</span>
-                                <ChevronDown className="h-4 w-4" />
+                                <ChevronDown className="size-4" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                             align="start"
                             data-testid="dropdown-model-selector-menu-content"
+                            className="p-2"
                         >
                             <div className="relative">
-                                <Search className="absolute left-2.5 top-1/2 h-4 w-4 text-muted-foreground -translate-y-1/2" />
+                                <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground select-none" />
                                 <Input
-                                    placeholder="Search..."
+                                    placeholder={t('Search...')}
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
                                     onKeyDown={e => e.stopPropagation()}
-                                    className="pl-8 h-8"
+                                    className="pl-8"
                                     data-testid="dropdown-model-selector-search"
                                 />
                             </div>
 
-                            <ScrollArea className="w-full max-h-80 overflow-y-scroll  scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-300">
-                                {filteredItems?.map((llmModel, index) => (
-                                    <DropdownMenuItem
-                                        className="hover:bg-muted cursor-pointer"
-                                        onSelect={() => setSelectedLlmModel(llmModel)}
-                                        data-testid={`dropdown-model-selector-item-${llmModel.llmId.toLowerCase()}`}
-                                        key={`llm-${llmModel.llmId}-${index}`}
-                                    >
-                                        {llmModel.name}
-                                    </DropdownMenuItem>
-                                ))}
+                            <ScrollArea className="w-full">
+                                <div className="max-h-80">
+                                    {filteredItems?.map((llmModel, index) => (
+                                        <DropdownMenuItem
+                                            onSelect={() => setSelectedLlmModel(llmModel)}
+                                            data-testid={`dropdown-model-selector-item-${llmModel.llmId.toLowerCase()}`}
+                                            key={`llm-${llmModel.llmId}-${index}`}
+                                        >
+                                            {llmModel.name}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </div>
                             </ScrollArea>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -87,8 +95,8 @@ export function AppHeader() {
                         onClick={() => navigate(ROUTES.KNOWLEDGE_BASES)}
                         className="flex items-center gap-2"
                     >
-                        <ChevronLeft className="h-4 w-4" />
-                        Knowledge bases
+                        <ChevronLeft className="size-4" />
+                        {t('Knowledge bases')}
                     </Button>
                 )}
             </div>
@@ -98,8 +106,8 @@ export function AppHeader() {
                     onClick={() => navigate(ROUTES.ADD_KNOWLEDGE_BASE)}
                     className="flex items-center gap-2"
                 >
-                    <Plus className="h-4 w-4" />
-                    Create knowledge base
+                    <Plus className="size-4" />
+                    {t('Create knowledge base')}
                 </Button>
             )}
         </header>

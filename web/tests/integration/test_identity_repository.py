@@ -126,3 +126,119 @@ async def test_upsert_identity_concurrent_insert_simulated(
 
     assert identity.id is not None
     assert call_counter["count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_identity_preserves_fields_when_update_none_values_false(
+    db_deps: Deps,
+) -> None:
+    """
+    Verify that upsert_identity with update_none_values=False (default) preserves
+    existing values when IdentityUpdate fields are explicitly set to None.
+    """
+    user_repo = db_deps.user_repo
+    identity_repo: IdentityRepository = db_deps.identity_repo
+
+    user = await user_repo.create_user(
+        UserCreate(email="preserve@example.com", first_name="Al", last_name="Bo")
+    )
+    assert user.id
+
+    # Create identity with datarobot metadata
+    created = await identity_repo.upsert_identity(
+        user_id=user.id,
+        auth_type=AuthSchema.DATAROBOT,
+        provider_id="datarobot_user",
+        provider_type="datarobot_user",
+        provider_user_id="dr-user-1",
+        update=IdentityUpdate(
+            datarobot_org_id="org-123",
+            datarobot_tenant_id="tenant-456",
+        ),
+    )
+
+    assert created.datarobot_org_id == "org-123"
+    assert created.datarobot_tenant_id == "tenant-456"
+
+    # Simulate the DataRobot scenario where profile_metadata doesn't have org_id/tenant_id
+    # dict.get() returns None for missing keys, which would previously clear existing values
+    profile_metadata: dict[str, str] = {}  # Missing org_id and tenant_id
+    updated = await identity_repo.upsert_identity(
+        user_id=user.id,
+        auth_type=AuthSchema.DATAROBOT,
+        provider_id="datarobot_user",
+        provider_type="datarobot_user",
+        provider_user_id="dr-user-1",
+        update=IdentityUpdate(
+            datarobot_org_id=profile_metadata.get("org_id"),  # Returns None
+            datarobot_tenant_id=profile_metadata.get("tenant_id"),  # Returns None
+        ),
+        # update_none_values=False is the default
+    )
+
+    assert updated.id == created.id
+    # Existing datarobot metadata should be preserved because update_none_values=False
+    assert updated.datarobot_org_id == "org-123", (
+        "datarobot_org_id should be preserved when None with update_none_values=False"
+    )
+    assert updated.datarobot_tenant_id == "tenant-456", (
+        "datarobot_tenant_id should be preserved when None with update_none_values=False"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_identity_clears_fields_when_update_none_values_true(
+    db_deps: Deps,
+) -> None:
+    """
+    Verify that upsert_identity can clear fields when update_none_values=True.
+
+    This tests the OAuth re-authorization flow where tokens need to be explicitly
+    cleared. By setting update_none_values=True, None values in IdentityUpdate
+    will overwrite existing field values, enabling intentional token clearing.
+    """
+    user_repo = db_deps.user_repo
+    identity_repo: IdentityRepository = db_deps.identity_repo
+
+    user = await user_repo.create_user(
+        UserCreate(email="clear@example.com", first_name="Al", last_name="Bo")
+    )
+    assert user.id
+
+    # Create identity with tokens
+    created = await identity_repo.upsert_identity(
+        user_id=user.id,
+        auth_type=AuthSchema.OAUTH2,
+        provider_id="google",
+        provider_type="google",
+        provider_user_id="google-user-clear",
+        update=IdentityUpdate(
+            access_token="old-token",
+            refresh_token="old-refresh",
+        ),
+    )
+
+    assert created.access_token == "old-token"
+    assert created.refresh_token == "old-refresh"
+
+    # Clear tokens by setting them to None with update_none_values=True
+    updated = await identity_repo.upsert_identity(
+        user_id=user.id,
+        auth_type=AuthSchema.OAUTH2,
+        provider_id="google",
+        provider_type="google",
+        provider_user_id="google-user-clear",
+        update=IdentityUpdate(
+            access_token=None,  # Explicitly set to None to clear
+            refresh_token=None,  # Explicitly set to None to clear
+        ),
+        update_none_values=True,  # Required to allow None values to clear fields
+    )
+
+    assert updated.id == created.id
+    assert updated.access_token is None, (
+        "access_token should be cleared when update_none_values=True"
+    )
+    assert updated.refresh_token is None, (
+        "refresh_token should be cleared when update_none_values=True"
+    )

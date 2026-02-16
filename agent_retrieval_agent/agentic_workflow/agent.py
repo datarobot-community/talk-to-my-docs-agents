@@ -11,16 +11,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import asyncio
 import json
+import logging
+import threading
 from textwrap import dedent
 from typing import Any, Dict, Optional, Union
 
 from crewai import LLM, Agent, Crew, Task
+from crewai.events import crewai_event_bus
+from crewai.events.types.task_events import TaskCompletedEvent, TaskStartedEvent
+from datarobot_genai.core.agents.base import (
+    InvokeReturn,
+    extract_user_prompt_content,
+    is_streaming,
+)
 from datarobot_genai.crewai.agent import (
     build_llm,
 )
 from datarobot_genai.crewai.base import CrewAIAgent
 from datarobot_genai.crewai.events import CrewAIEventListener
+from openai.types.chat import CompletionCreateParams
 
 import models
 from config import Config
@@ -31,6 +42,8 @@ from tool import (
     KnowledgeBaseContentTool,
     KnowledgeBaseSearchTool,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MyAgent(CrewAIAgent):
@@ -160,7 +173,7 @@ class MyAgent(CrewAIAgent):
     @property
     def agent_file_searcher(self) -> Agent:
         return Agent(
-            role="File Searcher",
+            role="Files Agent",
             goal='Find the most closely related filenames and their contents from a list of files on the topic: "{topic}" as it relates to the question: "{question}". Your services aren\'t needed if the document is in the question already.',
             backstory="You are an expert at searching and reading files for helpful information. You can identify the most relevant"
             "file from a list of files. You are given a list of files and a topic. ",
@@ -175,7 +188,7 @@ class MyAgent(CrewAIAgent):
     @property
     def task_file_search(self) -> Task:
         return Task(
-            name="File List",
+            name="Searching files",
             description=dedent(
                 """
                 Find the most relevant files to "{topic}" and "{question}" from a list of files.
@@ -201,7 +214,7 @@ class MyAgent(CrewAIAgent):
     @property
     def task_write(self) -> Task:
         return Task(
-            name="File Read",
+            name="Reading content",
             description=dedent("""
                 1. Read the contents of the files you are given.
                 2. Think and understand deeply the contents of the file.
@@ -221,7 +234,7 @@ class MyAgent(CrewAIAgent):
     def document_in_question_agent(self) -> Agent:
         """An agent that can be used to answer questions about a document."""
         return Agent(
-            role="Document Question Answerer",
+            role="Document Agent",
             goal=dedent("""
                 If the question: "{question}" contains the phrase:
                 "Here are the relevant documents with each document separated by three dashes",
@@ -242,7 +255,7 @@ class MyAgent(CrewAIAgent):
     @property
     def task_in_question_write(self) -> Task:
         return Task(
-            name="Embedded Document Question Answering",
+            name="Analyzing content",
             description=dedent("""
                 1. Check if the "{question}" contains the phrase "Here is the relevant document with each page separated by three dashes:".
                 2. If it does, separate the question from the document content.
@@ -264,7 +277,7 @@ class MyAgent(CrewAIAgent):
     def knowledge_base_agent(self) -> Agent:
         """An agent that searches through knowledge base files and answers questions using their content."""
         return Agent(
-            role="Knowledge Base Specialist",
+            role="Knowledge Base Agent",
             goal=(
                 "Given a knowledge base with files and limited content previews, first identify the most relevant files "
                 'for answering the question: "{question}", then retrieve and analyze their full content to provide a comprehensive answer.'
@@ -286,7 +299,7 @@ class MyAgent(CrewAIAgent):
     @property
     def task_knowledge_base_file_search(self) -> Task:
         return Task(
-            name="Knowledge Base File Search",
+            name="Searching knowledge base",
             description=dedent("""
                 Analyze the knowledge base `files` provided in this JSON:
 
@@ -316,6 +329,7 @@ class MyAgent(CrewAIAgent):
     @property
     def task_knowledge_base_content_answer(self) -> Task:
         return Task(
+            name="Analyzing knowledge base",
             description=dedent("""
                 IMPORTANT: You have previously identified relevant file UUIDs in your previous task output.
                 You must carefully examine the context from your previous task to extract these UUIDs.
@@ -352,7 +366,7 @@ class MyAgent(CrewAIAgent):
     def finalizer_agent(self) -> Agent:
         """An agent that coordinates and finalizes the outputs from all other agents."""
         return Agent(
-            role="Response Finalizer",
+            role="Finalizer Agent",
             goal=(
                 "Analyze the outputs from all previous agents and provide a single, coherent, well-formatted answer to the question: "
                 '"{question}" from the topic: "{topic}"'
@@ -374,6 +388,7 @@ class MyAgent(CrewAIAgent):
     @property
     def task_finalize_response(self) -> Task:
         return Task(
+            name="Preparing response",
             description=dedent("""
                 Analyze all the outputs from the previous agents and create a single, coherent answer to: "{question}".
 
@@ -416,8 +431,111 @@ class MyAgent(CrewAIAgent):
             self.task_finalize_response,
         ]
 
-    def crew(self) -> Crew:
+    def build_crewai_workflow(self) -> Crew:
         return Crew(agents=self.agents, tasks=self.tasks, verbose=self.verbose)
+
+    async def invoke(
+        self, completion_create_params: CompletionCreateParams
+    ) -> InvokeReturn:
+        """Override invoke to emit task progress events during streaming."""
+        user_prompt_content = extract_user_prompt_content(completion_create_params)
+        logger.debug("Running agent with user prompt: %s", user_prompt_content)
+
+        # Setup event listener if available
+        if hasattr(self, "event_listener") and crewai_event_bus is not None:
+            try:
+                listener = getattr(self, "event_listener")
+                setup_fn = getattr(listener, "setup_listeners", None)
+                if callable(setup_fn):
+                    setup_fn(crewai_event_bus)
+            except Exception as e:
+                logger.debug("Failed to setup event listener: %s", e)
+
+        crew = self.build_crewai_workflow()
+
+        if is_streaming(completion_create_params):
+            return self._streaming_invoke(crew, user_prompt_content)
+
+        crew_output = crew.kickoff(inputs=self.make_kickoff_inputs(user_prompt_content))
+        return self._process_crew_output(crew_output)
+
+    async def _streaming_invoke(
+        self, crew: Crew, user_prompt_content: str
+    ) -> InvokeReturn:
+        """Run crew with streaming task progress."""
+        loop = asyncio.get_running_loop()
+        event_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        def on_task_started(source: Any, event: TaskStartedEvent) -> None:
+            task_name = (
+                event.task.name if event.task and event.task.name else None
+            ) or "Task"
+            agent_name = (
+                event.task.agent.role if event.task and event.task.agent else None
+            ) or "Agent"
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {
+                    "type": "task_started",
+                    "task_name": task_name,
+                    "agent_name": agent_name,
+                },
+            )
+
+        def on_task_completed(source: Any, event: TaskCompletedEvent) -> None:
+            task_name = (
+                event.task.name if event.task and event.task.name else None
+            ) or "Task"
+            agent_name = (
+                event.task.agent.role if event.task and event.task.agent else None
+            ) or "Agent"
+            loop.call_soon_threadsafe(
+                event_queue.put_nowait,
+                {
+                    "type": "task_completed",
+                    "task_name": task_name,
+                    "agent_name": agent_name,
+                },
+            )
+
+        crew_result: Any = None
+        crew_error: Exception | None = None
+
+        def run_crew() -> None:
+            nonlocal crew_result, crew_error
+            try:
+                if crewai_event_bus is not None:
+                    with crewai_event_bus.scoped_handlers():
+                        crewai_event_bus.on(TaskStartedEvent)(on_task_started)
+                        crewai_event_bus.on(TaskCompletedEvent)(on_task_completed)
+                        crew_result = crew.kickoff(
+                            inputs=self.make_kickoff_inputs(user_prompt_content)
+                        )
+                else:
+                    # No event bus available, run without task progress events
+                    crew_result = crew.kickoff(
+                        inputs=self.make_kickoff_inputs(user_prompt_content)
+                    )
+            except Exception as e:
+                logger.exception("Crew execution failed: %s", e)
+                crew_error = e
+            finally:
+                loop.call_soon_threadsafe(event_queue.put_nowait, None)
+
+        thread = threading.Thread(target=run_crew, daemon=True)
+        thread.start()
+
+        # Efficiently await events without polling
+        empty_usage = {"completion_tokens": 0, "prompt_tokens": 0, "total_tokens": 0}
+        while (event := await event_queue.get()) is not None:
+            yield (json.dumps({"task_progress": event}), None, empty_usage)
+
+        await asyncio.to_thread(thread.join)
+
+        if crew_error:
+            raise crew_error
+
+        yield self._process_crew_output(crew_result)
 
     def _extract_and_store_knowledge_base_content(self, base: dict[str, Any]) -> None:
         """Extracts and stores the encoded content from knowledge base files."""

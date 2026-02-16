@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-from core.telemetry import configure_uvicorn_logging, init_logging
 from datarobot_asgi_middleware import DataRobotASGIMiddleware
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -30,6 +29,7 @@ from app.api import router as api_router
 from app.config import Config
 from app.deps import Deps, create_deps
 from app.streams import ChatStreamManager
+from app.telemetry import configure_uvicorn_logging, init_logging, otel
 
 base_router = APIRouter()
 
@@ -191,4 +191,6 @@ def create_app(
             },
         )
 
+    otel.log_application_start()
+    otel.instrument_fastapi_app(app)
     return app

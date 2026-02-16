@@ -40,6 +40,10 @@ jobs:
           npm ci
         working-directory: frontend_web
 
+      - name: Run Lint
+        run: npm run lint
+        working-directory: frontend_web
+
       - name: Run Vitest
         run: npm run test
         working-directory: frontend_web

@@ -41,6 +41,7 @@ from app.streams import (
     MessageEvent,
     SnapshotEvent,
     StreamEvent,
+    TaskProgressEvent,
     encode_sse_event,
 )
 
@@ -51,6 +52,59 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 chat_router = APIRouter(tags=["Chat"])
+
+DATAROBOT_IDENTITY_HEADER_NAME = "X-DataRobot-Identity-Token"
+
+
+class TaskProgressProcessor:
+    """Extracts task_progress events from streaming response content and accumulates regular content.
+
+    Processes delta.content strings from litellm's streaming response. Each string is
+    already complete (httpx-sse's SSELineDecoder handles HTTP-level buffering).
+    This class simply:
+    1. Checks if content is a task_progress JSON event
+    2. Parses and returns it if so
+    3. Accumulates regular response content
+    """
+
+    def __init__(self) -> None:
+        self.content = ""
+
+    def process_content(self, content: str) -> dict[str, Any] | None:
+        """Check if content is a task_progress event and return it, else accumulate.
+
+        Args:
+            content: Complete string from delta.content (guaranteed complete by httpx-sse)
+
+        Returns:
+            Task progress dict if content is a task_progress event, None otherwise
+        """
+        if content.startswith('{"task_progress'):
+            try:
+                parsed = json.loads(content)
+                if "task_progress" in parsed:
+                    result: dict[str, Any] = parsed["task_progress"]
+                    return result
+                else:
+                    logger.warning(
+                        "Content starts with task_progress marker but missing key: %s",
+                        content,
+                    )
+            except json.JSONDecodeError as e:
+                logger.error(
+                    "Failed to parse task_progress JSON: %s - content: %s",
+                    e,
+                    content,
+                )
+
+        # Regular content or unparseable content
+        self.content += content
+        return None
+
+    def flush(self) -> str:
+        """Return accumulated content."""
+        return self.content
+
 
 agent_deployment_url = getenv("AGENT_DEPLOYMENT_URL") or ""
 agent_deployment_token = getenv("AGENT_DEPLOYMENT_TOKEN") or "dummy"
@@ -83,6 +137,9 @@ def _normalize_model_id(raw_model: str) -> str:
     Add datarobot as a provider and handle any other provider string fixes for
     litellm
     """
+    # if the model is already a datarobot prefix, return it as is
+    if raw_model.startswith("datarobot/"):
+        return raw_model
     # fallback to datarobot provider
     return f"datarobot/{raw_model}"
 
@@ -106,15 +163,37 @@ def _is_wakeup_error(error_str: str) -> bool:
 
 
 def _extract_json_message(text: str) -> str | None:
-    """Try to extract message/detail from JSON, return None if not JSON or no message."""
-    try:
-        # Handle escaped quotes from upstream
-        unescaped = text.replace(r"\"", '"')
-        data = json.loads(unescaped)
-        msg = data.get("message") or data.get("detail")
-        return str(msg) if msg else None
-    except (json.JSONDecodeError, TypeError, AttributeError):
+    """Extract message from JSON error response."""
+    if not text or not isinstance(text, str):
         return None
+    # Find JSON object start and try to parse
+    idx = text.find("{")
+    if idx == -1:
+        return None
+    cleaned = text[idx:].rstrip(".")
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            msg = None
+            error_obj = data.get("error", {})
+            if isinstance(error_obj, dict):
+                # Try error.message, error.detail.message
+                msg = error_obj.get("message")
+                if not msg:
+                    detail = error_obj.get("detail")
+                    if isinstance(detail, dict):
+                        msg = detail.get("message")
+            if not msg:
+                msg = data.get("message")
+            if not msg:
+                detail = data.get("detail")
+                # Only use detail if it's a string, not array/dict
+                if isinstance(detail, str):
+                    msg = detail
+            return str(msg) if msg else None
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return None
 
 
 def _clean_error_message(error_str: str) -> str:
@@ -128,13 +207,16 @@ def _clean_error_message(error_str: str) -> str:
     )
     msg = re.sub(r"DatarobotException\s*-\s*", "", msg)
 
-    # Try to extract message from JSON
-    extracted = _extract_json_message(msg)
-    if extracted:
+    # Try to extract message from JSON (one level, then check for nested)
+    if extracted := _extract_json_message(msg):
         msg = extracted
+        # Check for one more level of nesting
+        if extracted2 := _extract_json_message(msg):
+            msg = extracted2
 
-    # Strip ERROR: prefix
+    # Strip ERROR: prefix and OS error codes
     msg = re.sub(r"^ERROR:\s*", "", msg)
+    msg = re.sub(r"^\[Errno \d+\]\s*", "", msg)
 
     # Take first line only (drop tracebacks)
     return msg.split("\n")[0].strip()
@@ -381,6 +463,15 @@ def _get_safe_completion_task(
     return task
 
 
+def get_extra_headers(request: Request) -> dict[str, str]:
+    extra_headers = {}
+
+    if identity_token := request.headers.get(DATAROBOT_IDENTITY_HEADER_NAME):
+        extra_headers[DATAROBOT_IDENTITY_HEADER_NAME] = identity_token
+
+    return extra_headers
+
+
 async def _send_chat_completion(
     request: Request,
     message_uuid: uuidpkg.UUID,
@@ -460,6 +551,7 @@ async def _send_chat_completion(
         messages=messages,
         model=_normalize_model_id(model),
         api_base=api_base,
+        extra_headers=get_extra_headers(request),
     )
     # Extract message content from LiteLLM response
     llm_message_content = completion["choices"][0]["message"]["content"] or ""
@@ -575,11 +667,50 @@ async def _send_chat_agent_completion(
         "Sending messages to Agent Workflow:\n%s", json.dumps(messages, indent=2)
     )
 
-    completion = await litellm.acompletion(messages=messages, **agent_kwargs)
-    # Extract message content from LiteLLM response
-    llm_message_content = completion["choices"][0]["message"]["content"] or ""
+    # Get message to access chat_id for publishing task progress
+    message_obj = await message_repo.get_message(message_uuid)
+    chat_id = message_obj.chat_id if message_obj else None
 
-    update_model = MessageUpdate(content=llm_message_content, in_progress=False)
+    processor = TaskProgressProcessor()
+
+    async for chunk in await litellm.acompletion(
+        messages=messages,
+        stream=True,
+        extra_headers=get_extra_headers(request),
+        **agent_kwargs,
+    ):
+        if hasattr(chunk, "choices") and chunk.choices:
+            delta = chunk.choices[0].delta
+            # Check for error signaled via refusal field (set by datarobot-genai)
+            if hasattr(delta, "refusal") and delta.refusal == "error":
+                error_msg = delta.content or "Agent error with no error message"
+                logger.error(
+                    "Agent streaming error signaled via refusal field: %s", error_msg
+                )
+                raise Exception(error_msg)
+            if hasattr(delta, "content") and delta.content:
+                content = delta.content
+                if not isinstance(content, str):
+                    logger.warning(
+                        "Received non-string content in streaming delta: %s (type: %s)",
+                        content,
+                        type(content).__name__,
+                    )
+                    continue
+
+                task_progress = processor.process_content(content)
+                if task_progress and chat_id:
+                    stream_manager.publish(
+                        chat_id,
+                        TaskProgressEvent(data=task_progress),
+                    )
+
+    llm_message_content = processor.flush()
+
+    update_model = MessageUpdate(
+        content=llm_message_content,
+        in_progress=False,
+    )
     updated_message = await message_repo.update_message(
         uuid=message_uuid,
         update=update_model,

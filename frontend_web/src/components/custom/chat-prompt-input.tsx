@@ -13,6 +13,7 @@ import {
     XIcon,
     Plus,
     Info,
+    TriangleAlert,
 } from 'lucide-react';
 import { cn, formatFileSize } from '@/lib/utils.ts';
 import {
@@ -36,6 +37,9 @@ import { useAppState } from '@/state';
 import { AGENT_MODEL } from '@/api/chat/constants';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/pages/routes.ts';
+import { Card, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { useTranslation } from '@/lib/i18n';
 
 export function ChatPromptInput({
     classNames,
@@ -44,6 +48,7 @@ export function ChatPromptInput({
     classNames?: string;
     isDisabled: boolean;
 }) {
+    const { t } = useTranslation();
     const navigate = useNavigate();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { chatId } = useParams<{ chatId: string }>();
@@ -175,7 +180,7 @@ export function ChatPromptInput({
                 className={cn(
                     isDisabled ? 'cursor-wait opacity-70' : '',
                     'transition-all',
-                    'justify-items-center p-5 w-2xl',
+                    'w-2xl justify-items-center p-5',
                     classNames
                 )}
                 data-testid="chat-prompt-input"
@@ -183,28 +188,24 @@ export function ChatPromptInput({
                 <Textarea
                     disabled={isDisabled}
                     onChange={e => setMessageDraft(e.target.value)}
-                    placeholder="Ask anything..."
+                    placeholder={t('Ask anything...')}
                     value={messageDraft}
-                    className={cn(
-                        isDisabled && 'pointer-events-none',
-                        'resize-none rounded-none',
-                        'dark:bg-muted border-gray-700'
-                    )}
+                    className="resize-none rounded-none"
                     onKeyDown={handleEnterPress}
                     onCompositionStart={() => setIsComposing(true)}
                     onCompositionEnd={() => setIsComposing(false)}
                     data-testid="chat-prompt-input-textarea"
                 />
-                <div className="w-full p-1 border border-t-0 border-gray-700">
-                    <div className="flex items-center justify-between h-12">
-                        <div className="flex gap-1 items-center">
+                <div className="w-full border border-t-0 p-1">
+                    <div className="flex h-12 items-center justify-between">
+                        <div className="flex items-center gap-1">
                             <DropdownMenu
                                 open={isSelectFileActionMenuOpen}
                                 onOpenChange={setIsSelectFileActionMenuOpen}
                             >
                                 <DropdownMenuTrigger asChild>
                                     <Button
-                                        className="justify-self-end cursor-pointer"
+                                        className="cursor-pointer justify-self-end"
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => true}
@@ -219,14 +220,14 @@ export function ChatPromptInput({
                                         className="cursor-pointer"
                                     >
                                         <ArrowUpFromLine />
-                                        Upload from computer
+                                        {t('Upload from computer')}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                         onClick={handleConnectedSourcesClick}
                                         className="cursor-pointer"
                                     >
                                         <CloudUpload />
-                                        Upload from connected source
+                                        {t('Upload from connected source')}
                                     </DropdownMenuItem>
                                     {/* Knowledge base selection for all models */}
                                     {bases.length > 0 || selectedKnowledgeBaseId ? (
@@ -240,7 +241,7 @@ export function ChatPromptInput({
                                                     className={cn(
                                                         'cursor-pointer',
                                                         selectedKnowledgeBaseId === base.uuid &&
-                                                            'bg-primary/10 text-primary font-semibold'
+                                                            'bg-primary/10 font-semibold text-primary'
                                                     )}
                                                 >
                                                     <BookOpenText
@@ -249,7 +250,7 @@ export function ChatPromptInput({
                                                                 'text-primary'
                                                         )}
                                                     />
-                                                    <div className="flex flex-col ml-2">
+                                                    <div className="ml-2 flex flex-col">
                                                         <span
                                                             className={cn(
                                                                 'font-medium',
@@ -260,17 +261,22 @@ export function ChatPromptInput({
                                                         >
                                                             {base.title}
                                                         </span>
-                                                        <span className="text-xs text-gray-500 truncate">
-                                                            {base.files.length} file
-                                                            {base.files.length !== 1
-                                                                ? 's'
-                                                                : ''} •{' '}
-                                                            {base.token_count.toLocaleString()}{' '}
-                                                            tokens
+
+                                                        <span className="truncate caption-01">
+                                                            {t(
+                                                                '{{files}} file • {{tokens}} tokens',
+                                                                {
+                                                                    files: base.files.length,
+                                                                    tokens: base.token_count.toLocaleString(),
+                                                                    count: base.files.length,
+                                                                    plural: '{{files}} files • {{tokens}} tokens',
+                                                                }
+                                                            )}
                                                         </span>
                                                         {!isAgentModel && (
-                                                            <span className="text-xs text-amber-600 font-medium">
-                                                                ⚠ High token usage possible
+                                                            <span className="caption-01 text-warning">
+                                                                <TriangleAlert className="mr-1 inline-block size-4" />
+                                                                {t('High token usage possible')}
                                                             </span>
                                                         )}
                                                     </div>
@@ -283,14 +289,14 @@ export function ChatPromptInput({
                                             className="cursor-pointer"
                                         >
                                             <BookOpenText />
-                                            Add knowledge base
+                                            {t('Add knowledge base')}
                                         </DropdownMenuItem>
                                     )}
                                 </DropdownMenuContent>
                             </DropdownMenu>
-                            <Info className="h-4 text-gray-400" />
-                            <p className="h-4 text-base text-gray-400 leading-none">
-                                Upload a file or select a knowledge base
+                            <p className="flex items-center gap-2 body-secondary">
+                                <Info className="size-5" />
+                                {t('Upload a file or select a knowledge base')}
                             </p>
                         </div>
                         <Input
@@ -305,10 +311,10 @@ export function ChatPromptInput({
                                 <TooltipTrigger asChild>
                                     <Button
                                         className={cn(
-                                            'justify-self-end cursor-pointer',
+                                            'cursor-pointer justify-self-end',
                                             showSuggestPromptButton &&
                                                 !chatId &&
-                                                'animate-[var(--animation-blink-border-and-shadow)]'
+                                                'animate-(--animation-blink-border-and-shadow)'
                                         )}
                                         variant="ghost"
                                         size="icon"
@@ -328,26 +334,29 @@ export function ChatPromptInput({
                                 </TooltipTrigger>
                                 <TooltipContent
                                     side="left"
-                                    className="whitespace-normal break-words"
+                                    className="wrap-break-word whitespace-normal"
                                 >
                                     <p>
                                         {showSuggestPromptButton
-                                            ? 'Ask DataRobot to suggest questions about your documents.'
-                                            : 'Submit prompt'}
+                                            ? t(
+                                                  'Ask DataRobot to suggest questions about your documents.'
+                                              )
+                                            : t('Submit prompt')}
                                     </p>
                                 </TooltipContent>
                             </Tooltip>
                         </TooltipProvider>
                     </div>
                     {selectedKnowledgeBase && (
-                        <div className="gap-2 mt-2 bg-accent/30 p-2 rounded w-1/2">
-                            <div className="flex items-center spacebetween">
-                                <p
-                                    className="text-base truncate"
+                        <Card className="mt-2 w-1/2 gap-2 p-2">
+                            <div className="spacebetween flex items-center">
+                                <CardTitle
+                                    size="medium"
+                                    className="truncate"
                                     title={selectedKnowledgeBase.title}
                                 >
                                     {selectedKnowledgeBase.title}
-                                </p>
+                                </CardTitle>
                                 <Button
                                     variant="ghost"
                                     size="sm"
@@ -358,58 +367,57 @@ export function ChatPromptInput({
                                 </Button>
                             </div>
                             <div>
-                                <div className=" flex text-sm items-center text-gray-600 gap-2 mb-2">
-                                    <div className="bg-indigo-400 rounded-full px-2 py-1 text-xs text-gray-900 vertical-align-middle">
-                                        Knowledge base
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                        {selectedKnowledgeBase.files.length} file
-                                        {selectedKnowledgeBase.files.length !== 1 ? 's' : ''} •{' '}
-                                        {selectedKnowledgeBase.token_count.toLocaleString()} tokens
+                                <div className="mb-2 flex items-center gap-2 body-secondary">
+                                    <Badge variant="info">{t('Knowledge base')}</Badge>
+                                    <div className="caption-01">
+                                        {t('{{files}} file • {{tokens}} tokens', {
+                                            files: selectedKnowledgeBase.files.length,
+                                            tokens: selectedKnowledgeBase.token_count.toLocaleString(),
+                                            count: selectedKnowledgeBase.files.length,
+                                            plural: '{{files}} files • {{tokens}} tokens',
+                                        })}
                                     </div>
                                 </div>
                                 {!isAgentModel && (
-                                    <div className="text-xs text-amber-600 font-medium">
-                                        ⚠ High token usage possible
+                                    <div className="caption-01 font-medium text-warning">
+                                        <TriangleAlert className="mr-1 inline-block size-4" />
+                                        {t('High token usage possible')}
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        </Card>
                     )}
                     {(isFileUploading || isExternalFileUploading) && (
-                        <Skeleton className="w-full h-10 my-3">
-                            <div className="group flex items-center pt-2 gap-4 w-full ">
-                                <div className="flex justify-center items-center w-8">
+                        <Skeleton className="my-3 h-10 w-full">
+                            <div className="group flex w-full items-center gap-4 pt-2">
+                                <div className="flex w-8 items-center justify-center">
                                     <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
                                 </div>
-                                <div className="flex flex-col flex-1 min-w-0">
-                                    <div className="text-sm font-normal leading-tight truncate">
-                                        {fileUploadName}
-                                    </div>
+                                <div className="flex min-w-0 flex-1 flex-col">
+                                    <div className="truncate body">{fileUploadName}</div>
                                 </div>
-                                <div className="flex items-center mx-2">Uploading...</div>
+                                <div className="mx-2 flex items-center body-secondary">
+                                    {t('Uploading...')}
+                                </div>
                             </div>
                         </Skeleton>
                     )}
                     {selectedFiles?.map((file, index) => (
-                        <div
-                            key={index}
-                            className="group flex items-center pt-6 pb-3 gap-4 w-full "
-                        >
-                            <div className="flex justify-center items-center w-8">
+                        <div key={index} className="group flex w-full items-center gap-4 pt-6 pb-3">
+                            <div className="flex w-8 items-center justify-center">
                                 <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
                             </div>
-                            <div className="flex flex-col flex-1 min-w-0">
-                                <div className="text-sm font-normal leading-tight truncate">
-                                    {file.filename}
-                                </div>
-                                <div className="text-xs text-gray-400 leading-tight truncate">
-                                    File size: {formatFileSize(file?.size_bytes || 0)}
+                            <div className="flex min-w-0 flex-1 flex-col">
+                                <div className="truncate body">{file.filename}</div>
+                                <div className="truncate caption-01">
+                                    {t('File size: {{size}}', {
+                                        size: formatFileSize(file?.size_bytes || 0),
+                                    })}
                                 </div>
                             </div>
-                            <div className="flex items-center ml-2">
+                            <div className="ml-2 flex items-center">
                                 <XIcon
-                                    className="w-4 h-4 cursor-pointer text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="size-4 cursor-pointer text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                                     onClick={event => {
                                         event.stopPropagation();
                                         if (isDisabled) {

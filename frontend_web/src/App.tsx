@@ -21,13 +21,13 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { Spinner } from '@/components/ui/spinner';
 import { useAppState } from '@/state';
 
-
 import './App.css';
 import { useLlmCatalog } from '@/api/chat/hooks';
 import { useCurrentUser } from '@/api/auth/hooks.ts';
 import { Toaster } from './components/ui/toast';
 import { RenameChatModal } from '@/components/custom/rename-chat-modal.tsx';
 import { DeleteChatModal } from '@/components/custom/delete-chat-modal.tsx';
+import { useTranslation } from '@/lib/i18n';
 
 function App() {
     const {
@@ -56,16 +56,11 @@ function App() {
 
     return (
         <SidebarProvider>
-            <div className="flex flex-1 min-h-screen dark">
+            <div className="flex min-h-screen flex-1">
                 <AppSidebar />
-                <div className="flex flex-col flex-1 h-screen">
+                <div className="flex h-screen flex-1 flex-col">
                     {isUserLoading && isLlmCatalogLoading ? (
-                        <div
-                            className="flex items-center gap-3 h-screen justify-center"
-                            data-testid="app-loader"
-                        >
-                            <Spinner>Loading...</Spinner>
-                        </div>
+                        <LoadingSpinner />
                     ) : (
                         <>
                             <AppHeader />
@@ -82,3 +77,12 @@ function App() {
 }
 
 export default App;
+
+function LoadingSpinner() {
+    const { t } = useTranslation();
+    return (
+        <div className="flex h-screen items-center justify-center gap-3" data-testid="app-loader">
+            <Spinner>{t('Loading...')}</Spinner>
+        </div>
+    );
+}

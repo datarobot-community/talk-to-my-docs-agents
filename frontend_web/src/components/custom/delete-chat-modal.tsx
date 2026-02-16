@@ -11,8 +11,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppState } from '@/state';
 import { useChats, useChatsDelete } from '@/api/chat/hooks.ts';
 import { getChatNameOrDefaultWithTimestamp } from '@/lib/utils.ts';
+import { useTranslation } from '@/lib/i18n';
 
 export const DeleteChatModal = () => {
+    const { t } = useTranslation();
     const [name, setName] = useState<string>('');
     const { showDeleteChatModalForId, setShowDeleteChatModalForId } = useAppState();
     const { data: chats = [] } = useChats();
@@ -39,11 +41,11 @@ export const DeleteChatModal = () => {
         <Dialog defaultOpen={false} open={!!chat} onOpenChange={handleXButton}>
             <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
-                    <DialogTitle>Delete Chat</DialogTitle>
+                    <DialogTitle>{t('Delete Chat')}</DialogTitle>
                 </DialogHeader>
                 <DialogDescription>
-                    Are you sure you want to delete this chat?
-                    <span className="block font-bold mt-2">{name}</span>
+                    {t('Are you sure you want to delete this chat?')}
+                    <span className="mt-2 block font-bold">{name}</span>
                 </DialogDescription>
                 <DialogFooter>
                     <Button
@@ -52,7 +54,7 @@ export const DeleteChatModal = () => {
                             setShowDeleteChatModalForId(null);
                         }}
                     >
-                        Cancel
+                        {t('Cancel')}
                     </Button>
                     <Button
                         variant="destructive"
@@ -68,7 +70,7 @@ export const DeleteChatModal = () => {
                         }}
                         disabled={isPending}
                     >
-                        {isPending ? 'Deleting...' : 'Delete'}
+                        {isPending ? t('Deleting...') : t('Delete')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

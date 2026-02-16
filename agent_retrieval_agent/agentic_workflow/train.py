@@ -33,13 +33,15 @@ def train(
         inputs["topic"] = inputs["knowledge_base"]["description"]
     else:
         inputs["knowledge_base"] = ""
-    crew = agents.crew()
+    crew = agents.build_crewai_workflow()
     if skip_files:
         crew.agents = [
-            agent for agent in crew.agents if agent.role not in ["File Searcher"]
+            agent for agent in crew.agents if agent.role not in ["Files Agent"]
         ]
         crew.tasks = [
-            task for task in crew.tasks if task.name not in ["File List", "File Read"]
+            task
+            for task in crew.tasks
+            if task.name not in ["Searching files", "Reading content"]
         ]
     try:
         crew.train(n_iterations=iterations, inputs=inputs, filename=str(filename))

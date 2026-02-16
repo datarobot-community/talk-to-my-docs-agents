@@ -5,8 +5,10 @@ import { useOauthCallback } from '@/api/oauth/hooks';
 import { authKeys } from '@/api/auth/hooks';
 import { oauthKeys } from '@/api/oauth/keys';
 import { PATHS } from '@/constants/paths';
+import { useTranslation } from '@/lib/i18n';
 
 const OAuthCallback = () => {
+    const { t } = useTranslation();
     const navigate = useNavigate();
     const location = useLocation();
     const queryClient = useQueryClient();
@@ -47,7 +49,7 @@ const OAuthCallback = () => {
         }
         if (isError) {
             // Just show the error message as a string
-            let errorMessage = 'OAuth connection failed';
+            let errorMessage = t('OAuth connection failed');
             if (error && typeof error === 'object' && 'response' in error) {
                 const axiosError = error as { response?: { data?: { detail?: unknown } } };
                 const detail = axiosError.response?.data?.detail;
@@ -66,7 +68,7 @@ const OAuthCallback = () => {
         }
     }, [isSuccess, isError, navigate, queryClient, error]);
 
-    return <div className="flex items-center justify-center h-full">Finishing sign-in…</div>;
+    return <div className="flex h-full items-center justify-center">{t('Finishing sign-in…')}</div>;
 };
 
 export default OAuthCallback;

@@ -1,7 +1,8 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import drLogo from '@/assets/DataRobot_white.svg';
-
+import drLogoDark from '@/assets/DataRobot_black.svg';
+import drLogoLight from '@/assets/DataRobot_white.svg';
+import { useTheme } from '@/theme/theme-provider';
 import { useAppState } from '@/state';
 import { ChatPromptInput } from '@/components/custom/chat-prompt-input.tsx';
 import { IChatMessage } from '@/api/chat/types.ts';
@@ -13,8 +14,10 @@ import { useChatMessages } from '@/api/chat/hooks.ts';
 import { useChatStream } from '@/hooks/useChatStream';
 import { useChatSession } from '@/hooks';
 import { ChatSessionProvider } from '@/state/ChatSessionContext';
+import { Heading } from '@/components/ui/heading';
 
 const Chat = () => {
+    const { theme } = useTheme();
     const { selectedLlmModel } = useAppState();
     const { chatId } = useParams<{ chatId: string }>();
     const chatSession = useChatSession(chatId);
@@ -49,17 +52,17 @@ const Chat = () => {
     if (messages.length === 0 || (!chatId && !chatSession.isLoading)) {
         return (
             <ChatSessionProvider value={chatSession}>
-                <div className="flex flex-col items-center justify-center w-full h-full">
+                <div className="flex size-full flex-col items-center justify-center">
                     <div className="flex">
                         <img
-                            src={drLogo}
+                            src={theme === 'dark' ? drLogoLight : drLogoDark}
                             alt="DataRobot"
-                            className="w-[130px] cursor-pointer ml-2.5 py-3.5"
+                            className="ml-2.5 w-[130px] cursor-pointer py-3.5"
                         />
                     </div>
-                    <h1 className="text-4xl my-4" data-testid="app-model-name">
+                    <Heading level={1} className="my-4" data-testid="app-model-name">
                         {selectedLlmModel.name}
-                    </h1>
+                    </Heading>
                     <ChatPromptInput isDisabled={disableChatPrompt} />
                 </div>
             </ChatSessionProvider>
@@ -69,14 +72,14 @@ const Chat = () => {
     return (
         <ChatSessionProvider value={chatSession}>
             <div
-                className="flex flex-col items-center w-full min-h-[calc(100vh-4rem)]"
+                className="flex min-h-[calc(100vh-4rem)] w-full flex-col items-center"
                 data-testid="chat-conversation-view"
             >
                 <ScrollArea
-                    className="flex-1 w-full overflow-auto mb-5 scroll"
+                    className="scroll mb-5 w-full flex-1 overflow-auto"
                     scrollViewportRef={containerRef}
                 >
-                    <div className="justify-self-center px-4 w-full">
+                    <div className="w-full justify-self-center px-4">
                         {messages.map((message: IChatMessage, index: number) =>
                             message.role === 'user' ? (
                                 <ChatUserMessage

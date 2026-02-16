@@ -11,15 +11,29 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
+from datarobot.auth.datarobot.exceptions import OAuthServiceError
+from datarobot.auth.identity import Identity as AuthIdentity
+from datarobot.auth.oauth import OAuthToken
+from datarobot.auth.session import AuthCtx
+from datarobot.auth.typing import Metadata
+from datarobot.auth.users import User as AuthUser
 from fastapi import Request
 from fastapi.exceptions import HTTPException
 
 from app import Deps
+from app.api.v1.schema import ErrorCodes
 from app.auth.api_key import DRUser
-from app.auth.ctx import AUTH_SESS_KEY, DRAppCtx, get_auth_ctx, get_datarobot_ctx
+from app.auth.ctx import (
+    AUTH_SESS_KEY,
+    DRAppCtx,
+    get_access_token,
+    get_auth_ctx,
+    get_datarobot_ctx,
+)
 from app.users.identity import AuthSchema, IdentityCreate, ProviderType
 from app.users.user import UserCreate
 
@@ -344,3 +358,114 @@ async def test_session_not_updated_when_switching_between_api_key_and_email(
         "Session data should have changed when switching from API key to email auth, "
         "but it remained the same (indicates stale session bug)"
     )
+
+
+# ============================================================================
+# Tests for get_access_token dependency (OAuth reauth handling)
+# ============================================================================
+
+
+async def test__get_access_token__identity_not_found__returns_409(
+    db_deps: Deps,
+) -> None:
+    """
+    When user doesn't have an identity for the requested provider,
+    get_access_token should return 409 CONFLICT with NOT_AUTHORIZED error code.
+    """
+    req = AsyncMock(spec=Request)
+    req.app.state.deps = db_deps
+
+    # Create auth context with no Google identity (use datarobot.auth types)
+    auth_ctx = AuthCtx[Metadata](
+        user=AuthUser(id="1", email="test@example.com"),
+        identities=[],  # No identities
+    )
+
+    # Get the dependency function for Google provider
+    get_google_token = get_access_token(ProviderType.GOOGLE)
+
+    # Should raise HTTPException with 409 status
+    with pytest.raises(HTTPException) as exc_info:
+        await get_google_token(req, auth_ctx)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == ErrorCodes.NOT_AUTHORIZED
+
+
+async def test__get_access_token__oauth_error__returns_401_with_reauth_code(
+    db_deps: Deps,
+) -> None:
+    """
+    When token refresh fails with OAuthServiceError (e.g., token revoked),
+    get_access_token should return 401 UNAUTHORIZED with OAUTH_REAUTH_REQUIRED code.
+    """
+    req = AsyncMock(spec=Request)
+    req.app.state.deps = db_deps
+
+    # Create auth context with a Google identity (use datarobot.auth types)
+    auth_ctx = AuthCtx[Metadata](
+        user=AuthUser(id="1", email="test@example.com"),
+        identities=[
+            AuthIdentity(
+                id="1",
+                type="oauth2",
+                provider_type=ProviderType.GOOGLE.value,
+                provider_user_id="google-user-123",
+            )
+        ],
+    )
+
+    # Configure the tokens mock to raise OAuthServiceError
+    db_deps.tokens.get_access_token.side_effect = OAuthServiceError(  # type: ignore[attr-defined]
+        message="Token has been revoked by user",
+        status_code=401,
+    )
+
+    # Get the dependency function for Google provider
+    get_google_token = get_access_token(ProviderType.GOOGLE)
+
+    # Should raise HTTPException with 401 status
+    with pytest.raises(HTTPException) as exc_info:
+        await get_google_token(req, auth_ctx)
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail["code"] == ErrorCodes.OAUTH_REAUTH_REQUIRED
+    assert "reconnect" in exc_info.value.detail["message"].lower()
+
+
+async def test__get_access_token__success__returns_token(
+    db_deps: Deps,
+) -> None:
+    """
+    When token retrieval succeeds, get_access_token should return the OAuthToken.
+    """
+    req = AsyncMock(spec=Request)
+    req.app.state.deps = db_deps
+
+    # Create auth context with a Google identity (use datarobot.auth types)
+    auth_ctx = AuthCtx[Metadata](
+        user=AuthUser(id="1", email="test@example.com"),
+        identities=[
+            AuthIdentity(
+                id="1",
+                type="oauth2",
+                provider_type=ProviderType.GOOGLE.value,
+                provider_user_id="google-user-123",
+            )
+        ],
+    )
+
+    # Configure the tokens mock to return a valid token
+    expected_token = OAuthToken(
+        access_token="valid-access-token",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    db_deps.tokens.get_access_token.return_value = expected_token  # type: ignore[attr-defined]
+
+    # Get the dependency function for Google provider
+    get_google_token = get_access_token(ProviderType.GOOGLE)
+
+    # Should return the token
+    token = await get_google_token(req, auth_ctx)
+
+    assert token.access_token == expected_token.access_token

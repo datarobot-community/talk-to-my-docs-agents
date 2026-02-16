@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils.ts';
 import { MessageCircleMore } from 'lucide-react';
 
 const UserAvatar = () => (
-    <div className="w-7.5 h-7.5 p-2.5 bg-[#7c97f8] rounded-[100px] flex-col justify-center items-center gap-2.5 inline-flex overflow-hidden">
+    <div className="inline-flex size-7.5 flex-col items-center justify-center gap-2.5 overflow-hidden rounded-[100px] bg-[#7c97f8] p-2.5">
         <div className="text-primary-foreground">
             <MessageCircleMore size={22} />
         </div>
@@ -18,7 +18,7 @@ export function ChatUserMessage({
     message: IChatMessage;
 }) {
     return (
-        <div className={cn('w-fit flex gap-2 p-3 bg-card rounded-md items-center', classNames)}>
+        <div className={cn('flex w-fit items-center gap-2 rounded-md bg-card p-3', classNames)}>
             <UserAvatar />
             <p className="">{message.content}</p>
         </div>

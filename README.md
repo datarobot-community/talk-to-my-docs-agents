@@ -350,7 +350,7 @@ task frontend_web:dev
 #### Running the backend
 
 ```sh
-task web:dev-agent
+task web:dev
 ```
 
 Running the web backend with a deployed agent:
