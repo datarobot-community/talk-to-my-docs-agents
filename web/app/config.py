@@ -38,6 +38,11 @@ class Config(DataRobotAppFrameworkBaseSettings):
     box_client_id: str | None = None
     box_client_secret: str | None = None
 
+    # SharePoint/Azure OAuth configuration
+    sharepoint_client_id: str | None = None
+    sharepoint_client_secret: str | None = None
+    sharepoint_tenant_id: str | None = None
+
     session_secret_key: str
     session_max_age: int = 14 * 24 * 60 * 60  # 14 days, in seconds
     session_https_only: bool = True

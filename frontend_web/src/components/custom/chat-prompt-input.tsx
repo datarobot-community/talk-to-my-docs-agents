@@ -136,7 +136,10 @@ export function ChatPromptInput({
         e.target.value = '';
     };
 
-    const handleExternalFileSelect = (file: ExternalFile, source: 'google' | 'box') => {
+    const handleExternalFileSelect = (
+        file: ExternalFile,
+        source: 'google' | 'box' | 'sharepoint'
+    ) => {
         // Upload the external file using the new API
         setFileUploadName(file?.name);
         mutateExternalFile({ file, source });

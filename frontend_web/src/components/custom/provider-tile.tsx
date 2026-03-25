@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 import gdriveIcon from '@/assets/GoogleDriveLogo.svg';
 import boxIcon from '@/assets/BoxLogo.svg';
+import sharepointIcon from '@/assets/SharePointLogo.svg';
 import { IOAuthProviderType } from '@/api/oauth/types';
 import { Card, CardFooter, CardContent, CardHeader } from '../ui/card';
 
@@ -20,6 +21,7 @@ interface ProviderTileProps {
 const PROVIDER_LOGOS: Record<IOAuthProviderType, string> = {
     google: gdriveIcon,
     box: boxIcon,
+    sharepoint: sharepointIcon,
 };
 
 export function ProviderTile({
@@ -33,6 +35,7 @@ export function ProviderTile({
     const PROVIDER_DISPLAY_NAMES: Record<IOAuthProviderType, string> = {
         google: t('Google Drive'),
         box: t('Box'),
+        sharepoint: t('SharePoint'),
     };
 
     const STATUS_CONFIG = {

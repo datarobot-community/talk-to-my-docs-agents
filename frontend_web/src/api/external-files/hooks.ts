@@ -1,8 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getGoogleFiles, getBoxFiles, uploadGoogleFile, uploadBoxFile } from './requests';
+import {
+    getGoogleFiles,
+    getBoxFiles,
+    getSharePointFiles,
+    uploadGoogleFile,
+    uploadBoxFile,
+    uploadSharePointFile,
+} from './requests';
 import { externalFilesKeys } from './keys';
 import { useCurrentUser } from '@/api/auth/hooks';
-import { ConnectedSource, ExternalFile } from './types';
+import { ConnectedSource, ExternalFile, SharePointNavState } from './types';
 import { IIdentity } from '@/api/auth/types';
 import { FileSchema } from '../knowledge-bases/types';
 import { knowledgeBasesKeys } from '../knowledge-bases/keys';
@@ -53,6 +60,26 @@ export const useBoxFiles = (folderId: string = '0', enabled: boolean = true) => 
     });
 };
 
+export const useSharePointFiles = (nav: SharePointNavState = {}, enabled: boolean = true) => {
+    const queryClient = useQueryClient();
+    return useQuery({
+        queryKey: externalFilesKeys.sharepointFolder(nav.siteId, nav.driveId, nav.folderId),
+        queryFn: () => getSharePointFiles(nav),
+        enabled,
+        retry: (failureCount, error) => {
+            if (error && typeof error === 'object' && 'response' in error) {
+                const axiosError = error as AxiosError;
+                if (axiosError.response?.status === 401 || axiosError.response?.status === 403) {
+                    queryClient.invalidateQueries({ queryKey: authKeys.currentUser });
+                    return false;
+                }
+            }
+            return failureCount < 2;
+        },
+        retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
+    });
+};
+
 // Hook to get available connected sources based on user identities
 export const useConnectedSources = () => {
     const { data: user } = useCurrentUser();
@@ -65,6 +92,9 @@ export const useConnectedSources = () => {
         );
         const hasBox = user.identities.some((identity: IIdentity) =>
             identity.provider_type?.toLowerCase().includes('box')
+        );
+        const hasSharePoint = user.identities.some((identity: IIdentity) =>
+            identity.provider_type?.toLowerCase().includes('sharepoint')
         );
 
         if (hasGoogle) {
@@ -81,6 +111,15 @@ export const useConnectedSources = () => {
                 id: 'box',
                 name: 'Box',
                 type: 'box',
+                isConnected: true,
+            });
+        }
+
+        if (hasSharePoint) {
+            connectedSources.push({
+                id: 'sharepoint',
+                name: 'SharePoint',
+                type: 'sharepoint',
                 isConnected: true,
             });
         }
@@ -109,14 +148,25 @@ export const useExternalFileUploadMutation = ({
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async ({ file, source }: { file: ExternalFile; source: 'google' | 'box' }) => {
+        mutationFn: async ({
+            file,
+            source,
+        }: {
+            file: ExternalFile;
+            source: 'google' | 'box' | 'sharepoint';
+        }) => {
             if (source === 'google') {
                 return await uploadGoogleFile({
                     fileId: file.id,
                     knowledgeBaseUuid: knowledgeBaseUuid,
                 });
-            } else {
+            } else if (source === 'box') {
                 return await uploadBoxFile({
+                    fileId: file.id,
+                    knowledgeBaseUuid: knowledgeBaseUuid,
+                });
+            } else {
+                return await uploadSharePointFile({
                     fileId: file.id,
                     knowledgeBaseUuid: knowledgeBaseUuid,
                 });

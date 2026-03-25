@@ -18,6 +18,18 @@
 </p>
 
 <p align="center">
+  <a href="https://app.datarobot.com/usecases/application-templates/689271200900e0f8cce1f264?referrerUrl=github">
+    <img src="https://img.shields.io/badge/US-Open%20in%20a%20Codespace-%23909BF5?style=flat&labelColor=%2330373D" alt="US - Open in a Codespace">
+  </a>
+  <a href="https://app.eu.datarobot.com/usecases/application-templates/689271200900e0f8cce1f264?referrerUrl=github">
+    <img src="https://img.shields.io/badge/EU-Open%20in%20a%20Codespace-%232BC46F?labelColor=%2330373D" alt="EU - Open in a Codespace">
+  </a>
+  <a href="https://app.jp.datarobot.com/usecases/application-templates/689271200900e0f8cce1f264?referrerUrl=github">
+    <img src="https://img.shields.io/badge/JP-Open%20in%20a%20Codespace-%23EDA769?labelColor=%2330373D" alt="JP - Open in a Codespace">
+  </a>
+  <a href="https://app.jp.datarobot.com/usecases/application-templates/689271200900e0f8cce1f264?referrerUrl=github">
+    <img src="https://img.shields.io/badge/JP-%E3%80%8CCodespace%20%E3%81%A7%E9%96%8B%E3%81%8F%E3%80%8D-%23EDA769?labelColor=%2330373D" alt="JP - 「Codespaceで開く」">
+  </a>
   <a href="https://github.com/datarobot-community/talk-to-my-docs-agents/tags">
     <img src="https://img.shields.io/github/v/tag/datarobot-community/datarobot-agent-templates?label=version" alt="Latest Release">
   </a>
@@ -28,7 +40,9 @@
 
 # Talk to My Docs
 
-Talk to My Docs is a modular application template for building, developing, and deploying an AI-powered application. It features multi-agent orchestration, modern web frontends, and robust infrastructure-as-code to dynamically interact with your documents across different providers such as Google Drive, Box, and your local computer.
+Talk to My Docs is a modular application template for building, developing, and deploying an AI-powered application. \
+It features multi-agent orchestration, modern web frontends, and robust infrastructure-as-code to dynamically interact \
+with your documents across different providers such as Google Drive, Box, SharePoint, and your local computer.
 
 > [!WARNING]
 > This template is a starting point. You must adapt it for your business requirements before deploying to production.
@@ -536,7 +550,7 @@ compatible [database](web/README.md#database-configuration) and [OAuth providers
 
 ## OAuth applications
 
-The template can work with files stored in Google Drive and Box.
+The template can work with files stored in Google Drive, Box, and SharePoint.
 In order to give it access to those files, you need to configure OAuth applications.
 
 ### Google OAuth application
@@ -574,8 +588,77 @@ In order to give it access to those files, you need to configure OAuth applicati
 - Under the "Application Scopes", please make sure you have both `Read all files and folders stored in Box` and "Write all files and folders stored in Box" checkboxes selected. You need both because the script needs to write to the log that you've downloaded the selected files.
 - Finally, under the "OAuth 2.0 Credentials" section, you should be able to find your Client ID and Client Secret pair to setup in the template env variables as `BOX_CLIENT_ID` and `BOX_CLIENT_SECRET` correspondingly.
 
-After you've set those in your project `.env` file, on the next Pulumi Up, OAuth providers will be created in your DataRobot installation. To view and manage them and verify they are working,
-navigate to `<your_datarobot_url>/account/oauth-providers` or in US production: https://app.datarobot.com/account/oauth-providers.
+### SharePoint OAuth application (Microsoft Entra ID)
+
+SharePoint integration uses Microsoft Entra ID (formerly Azure AD) for authentication and **requires the authlib OAuth implementation** (`OAUTH_IMPL=authlib`).
+
+This template supports both:
+- **Azure OAuth (Delegated access)** - Users authenticate with their own Microsoft account to access SharePoint sites they have permission to view
+- **Azure Service Principal (App-only access)** - Application accesses SharePoint on behalf of the organization (backend/automation scenarios)
+
+#### Setup steps
+
+1. Go to [Microsoft Entra admin center](https://entra.microsoft.com/) or [Azure Portal](https://portal.azure.com/)
+2. Navigate to "Identity" > "Applications" > "App registrations" and click "New registration"
+3. Fill in:
+   - **Name**: e.g., "Talk to My Docs SharePoint"
+   - **Supported account types**: Select based on your needs (typically "Accounts in this organizational directory only")
+   - **Redirect URI**: Select "Web" and add your callback URLs:
+     - `http://localhost:5173/oauth/callback` - local vite dev server
+     - `http://localhost:8080/oauth/callback` - web-proxied frontend
+     - For production: `https://app.datarobot.com/custom_applications/{appId}/oauth/callback`
+4. Click "Register"
+
+#### Configure API permissions
+
+Navigate to "API permissions" and add the following:
+
+**For Delegated access (user-based):**
+- Microsoft Graph > Delegated permissions:
+  - `openid`
+  - `email`
+  - `profile`
+  - `User.Read`
+  - `Sites.Read.All`
+  - `offline_access` (for refresh tokens)
+
+**For App-only access (service principal):**
+- Microsoft Graph > Application permissions:
+  - `Sites.Read.All`
+
+After adding permissions, click "Grant admin consent for [Your Organization]".
+
+#### Create client secret
+
+1. Navigate to "Certificates & secrets" > "Client secrets"
+2. Click "New client secret", add a description, and set expiration
+3. Copy the secret **Value** immediately (it won't be shown again)
+
+#### Configure environment variables
+
+Copy the values from Azure and set them in your `.env` file:
+- **SHAREPOINT_CLIENT_ID**: Application (client) ID from the "Overview" page
+- **SHAREPOINT_CLIENT_SECRET**: The client secret value you just created
+- **SHAREPOINT_TENANT_ID**: Directory (tenant) ID from the "Overview" page
+
+```bash
+SHAREPOINT_CLIENT_ID=your-client-id
+SHAREPOINT_CLIENT_SECRET=your-client-secret
+SHAREPOINT_TENANT_ID=your-tenant-id
+
+# Required for SharePoint OAuth
+OAUTH_IMPL=authlib
+```
+
+#### Using SharePoint OAuth
+
+Since SharePoint uses the authlib implementation, ensure your application is configured with:
+```bash
+OAUTH_IMPL=authlib
+```
+
+After you've set those in your project `.env` file, on the next Pulumi Up, OAuth providers will be created in your DataRobot installation (Google and Box only). To view and manage them and verify they are working,
+navigate to `<your_datarobot_url>/account/oauth-providers`.
 
 Additionally, the Pulumi output variables are used to populate those providers for your codespace and local development environment as well.
 

@@ -1,35 +1,71 @@
 'use client';
 
-import { useState, createContext, useContext, useLayoutEffect } from 'react';
+import { useCurrentUser } from '@/api/auth/hooks';
+import { useState, createContext, useContext, useLayoutEffect, useEffect, useMemo } from 'react';
 
-type Theme = 'light' | 'dark';
+export type Theme = 'light' | 'dark';
 
 interface ThemeContextType {
-    theme: Theme;
-    setTheme: (theme: Theme) => void;
+    theme: 'light' | 'dark';
+    userTheme: Theme | 'system';
 }
 
+const PREFERS_COLOR_SCHEME_DARK = '(prefers-color-scheme: dark)';
+
 const ThemeContext = createContext<ThemeContextType>({
-    theme: 'light',
-    setTheme: () => {},
+    theme: 'dark',
+    userTheme: 'system',
 });
 
 export const useTheme = () => {
     return useContext(ThemeContext);
 };
 
+/**
+ * This hook is used to determine which system theme user has configured
+ * and set up listeners for system theme changes
+ * */
+function useSystemTheme() {
+    const [systemTheme, setSystemTheme] = useState(() => {
+        const isSystemDarkTheme = window.matchMedia(PREFERS_COLOR_SCHEME_DARK).matches;
+        if (isSystemDarkTheme) {
+            return 'dark';
+        }
+        return 'light';
+    });
+
+    useEffect(() => {
+        const darkModeQuery = window.matchMedia(PREFERS_COLOR_SCHEME_DARK);
+
+        function handleThemeChange(event: MediaQueryListEvent) {
+            setSystemTheme(event.matches ? 'dark' : 'light');
+        }
+
+        darkModeQuery.addEventListener('change', handleThemeChange);
+
+        return () => {
+            darkModeQuery.removeEventListener('change', handleThemeChange);
+        };
+    }, []);
+
+    return {
+        systemTheme: systemTheme as 'light' | 'dark',
+    };
+}
+
 const themeKey = 'app-theme';
 
+const getSystemTheme = () => {
+    return window.matchMedia(PREFERS_COLOR_SCHEME_DARK).matches ? 'dark' : 'light';
+};
+
 const getInitialTheme = () => {
-    // TODO Implement light theme
-    return 'dark';
     if (typeof window !== 'undefined') {
         const savedTheme = localStorage.getItem(themeKey);
-        if (savedTheme) {
-            console.log('savedTheme', savedTheme);
+        if (savedTheme && savedTheme !== 'system') {
             return savedTheme as Theme;
         }
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        return getSystemTheme();
     }
     return 'light';
 };
@@ -39,15 +75,33 @@ export const ThemeProvider = ({
 }: {
     children: React.ReactNode | ((props: { theme: Theme }) => React.ReactNode);
 }) => {
-    const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
+    const { data: user } = useCurrentUser();
+    const { systemTheme } = useSystemTheme();
+    const theme = useMemo(() => {
+        if (user?.theme === 'system') {
+            return systemTheme;
+        } else if (user?.theme) {
+            return user.theme;
+        }
+        return getInitialTheme();
+    }, [user?.theme, systemTheme]);
+
+    const userTheme = user?.theme || systemTheme;
 
     useLayoutEffect(() => {
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        localStorage.setItem(themeKey, theme);
     }, [theme]);
 
+    useEffect(() => {
+        if (user?.theme) {
+            localStorage.setItem(themeKey, user.theme);
+        }
+    }, [user?.theme]);
+
+    const value = useMemo(() => ({ theme, userTheme }), [theme, userTheme]);
+
     return (
-        <ThemeContext.Provider value={{ theme, setTheme }}>
+        <ThemeContext.Provider value={value}>
             {typeof children === 'function' ? children({ theme }) : children}
         </ThemeContext.Provider>
     );

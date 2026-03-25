@@ -15,7 +15,7 @@ function Textarea({ className, ...props }: React.ComponentProps<'textarea'>) {
           focus:border-accent
           disabled:cursor-not-allowed disabled:border-muted-foreground/20
           placeholder:disabled:text-muted-foreground/50
-          aria-invalid:border-destructive
+          aria-invalid:border-destructive-foreground
           md:text-sm
         `,
                 className
