@@ -168,7 +168,7 @@ class TestMyAgentCrewAI:
             (None, "https://app.datarobot.com/"),
         ],
     )
-    @patch("agent.LLM")
+    @patch("datarobot_genai.crewai.agent.LLM")
     def test_llm_gateway_with_api_base(self, mock_llm, api_base, expected_result):
         """Test api_base_litellm property with various URL formats."""
         with patch.dict(os.environ, {}, clear=True):
@@ -234,7 +234,7 @@ class TestMyAgentCrewAI:
             ),
         ],
     )
-    @patch("agent.LLM")
+    @patch("datarobot_genai.crewai.agent.LLM")
     def test_llm_deployment_with_api_base(self, mock_llm, api_base, expected_result):
         """Test api_base_litellm property with various URL formats."""
         with patch.dict(os.environ, {"LLM_DEPLOYMENT_ID": "test-id"}, clear=True):
@@ -248,7 +248,7 @@ class TestMyAgentCrewAI:
                 timeout=300,
             )
 
-    @patch("agent.LLM")
+    @patch("datarobot_genai.crewai.agent.LLM")
     def test_llm(self, mock_llm, agent):
         # Test that LLM is created with correct parameters
         agent.llm()
@@ -259,7 +259,7 @@ class TestMyAgentCrewAI:
             timeout=300,
         )
 
-    @patch("agent.LLM")
+    @patch("datarobot_genai.crewai.agent.LLM")
     def test_llm_property_with_no_api_base(self, mock_llm, agent):
         # Test that LLM is created with correct parameters
         with patch.dict(os.environ, {}, clear=True):
@@ -272,7 +272,7 @@ class TestMyAgentCrewAI:
                 timeout=300,
             )
 
-    @patch("datarobot_genai.crewai.agent.Crew")
+    @patch("datarobot_genai.crewai.base.Crew")
     @patch("agent.CrewAIEventListener")
     @patch("agent.Agent")
     def test_chat(

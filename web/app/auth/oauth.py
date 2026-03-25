@@ -20,7 +20,7 @@ from datarobot.auth.authlib.oauth import OAuthProviderConfig
 from datarobot.auth.datarobot.oauth import AsyncOAuth as DatarobotOAuth
 from datarobot.auth.oauth import AsyncOAuthComponent
 
-from app.users.auth import box_user_info_mapper, sharepoint_user_info_mapper
+from app.users.auth import box_user_info_mapper
 from app.users.identity import ProviderType
 
 if TYPE_CHECKING:
@@ -91,41 +91,14 @@ def get_oauth(config: "Config") -> AsyncOAuthComponent:
                 )
             )
 
-        if (
-            config.sharepoint_client_id
-            and config.sharepoint_client_secret
-            and config.sharepoint_tenant_id
-        ):
-            # Microsoft Entra ID (Azure AD) OAuth for SharePoint delegated access
-            # Uses OpenID Connect discovery for automatic endpoint configuration
-            provider_configs.append(
-                OAuthProviderConfig(
-                    id=ProviderType.SHAREPOINT.value,
-                    client_id=config.sharepoint_client_id,
-                    client_secret=config.sharepoint_client_secret,
-                    # Request delegated permissions for SharePoint access
-                    # Sites.Read.All - read access to all SharePoint sites user has access to
-                    # User.Read - read user's profile for identity
-                    # offline_access - get refresh tokens for long-lived sessions
-                    scope="openid email profile Sites.Read.All User.Read offline_access",
-                    server_metadata_url=f"https://login.microsoftonline.com/{config.sharepoint_tenant_id}/v2.0/.well-known/openid-configuration",
-                    userinfo_endpoint="https://graph.microsoft.com/v1.0/me",
-                    userinfo_mapper=sharepoint_user_info_mapper,
-                    authorize_params={
-                        "prompt": "consent",
-                    },
-                )
-            )
-
         if not provider_configs:
             logger.warning(
                 "No OAuth providers configured for the authlib implementation. "
-                "Use the `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BOX_CLIENT_ID`, `BOX_CLIENT_SECRET`, "
-                "`SHAREPOINT_CLIENT_ID`, `SHAREPOINT_CLIENT_SECRET`, and `SHAREPOINT_TENANT_ID` "
+                "Use the `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BOX_CLIENT_ID`, and `BOX_CLIENT_SECRET` "
                 "environment variables to set them up."
             )
 
-        return AuthlibOAuth(provider_configs)
+        return AuthlibOAuth()
 
     raise ValueError(
         f"Unsupported OAuth implementation: {config.oauth_impl}. "

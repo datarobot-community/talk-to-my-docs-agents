@@ -52,12 +52,6 @@ async def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@base_router.get("/api/v1/welcome")
-async def welcome() -> dict[str, str]:
-    """Simple API endpoint for demonstration with React"""
-    return {"message": "Hello from Fast API"}
-
-
 def get_app_base_url(api_port: str | None = None) -> str:
     """Get and normalize the application base URL."""
     app_base_url = os.getenv("BASE_PATH", "")

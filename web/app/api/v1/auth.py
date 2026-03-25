@@ -23,7 +23,7 @@ from datarobot.auth.oauth import (
 )
 from datarobot.auth.session import AuthCtx
 from datarobot.auth.typing import Metadata
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
@@ -34,7 +34,7 @@ from app.auth.ctx import AUTH_SESS_KEY, get_auth_ctx, must_get_auth_ctx
 from app.auth.session import restore_oauth_session, store_oauth_sess
 from app.users.identity import AuthSchema, Identity, IdentityUpdate
 from app.users.tokens import Tokens
-from app.users.user import LanguageEnum, ThemeEnum, User, UserCreate
+from app.users.user import User, UserCreate
 
 logger = logging.getLogger(name=__name__)
 
@@ -79,8 +79,6 @@ class UserSchema(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     profile_image_url: str | None = None
-    language: LanguageEnum
-    theme: ThemeEnum
 
     identities: list[IdentitySchema] = Field(..., alias="identities")
 
@@ -92,8 +90,6 @@ class UserSchema(BaseModel):
             first_name=user.first_name,
             last_name=user.last_name,
             profile_image_url=user.profile_image_url,
-            language=user.language,
-            theme=user.theme,
             identities=[
                 IdentitySchema.from_identity(identity) for identity in user.identities
             ],
@@ -111,13 +107,6 @@ class OAuthTokenRequestSchema(BaseModel):
                 "scope": None,
             }
         }
-
-
-class UserMetadataRequestSchema(BaseModel):
-    """Schema for updating user display preferences."""
-
-    language: LanguageEnum | None = None
-    theme: ThemeEnum | None = None
 
 
 auth_router = APIRouter(tags=["Authentication"])
@@ -336,10 +325,6 @@ async def oauth_callback(
                         last_name=user_profile.family_name,
                         email=user_profile.email,
                         profile_image_url=user_profile.photo_url,
-                        language=LanguageEnum.from_locale(user_profile.locale),
-                        theme=ThemeEnum.from_theme(
-                            getattr(user_profile, "theme", None)
-                        ),
                     ),
                 )
                 logger.info("created new user", extra={"user_id": user.id})
@@ -496,48 +481,6 @@ async def get_user(
         )
 
     # refresh our session just in case
-    request.session[AUTH_SESS_KEY] = user.to_auth_ctx().model_dump()
-
-    return UserSchema.from_user(user)
-
-
-@auth_router.put("/user/metadata/", responses={401: {"model": ErrorSchema}})
-async def update_user_metadata(
-    request: Request,
-    auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx),
-    payload: UserMetadataRequestSchema = Body(...),
-) -> UserSchema:
-    """
-    Update the current user metadata (theme and language preferences).
-    """
-    user_repo = request.app.state.deps.user_repo
-
-    user = await user_repo.get_user(user_id=int(auth_ctx.user.id))
-
-    if not user:
-        logger.error("session user not found", extra={"auth_ctx": auth_ctx})
-        err = ErrorSchema(
-            code=ErrorCodes.UNKNOWN_ERROR,
-            message="Could not find user in the session",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err.model_dump()
-        )
-
-    # Build update dict with only provided (non-None) fields
-    update_data = payload.model_dump(exclude_none=True)
-
-    if not update_data:
-        # Nothing to update, return current user
-        return UserSchema.from_user(user)
-
-    user = await user_repo.update_user_metadata(
-        user_id=int(auth_ctx.user.id),
-        theme=update_data.get("theme"),
-        language=update_data.get("language"),
-    )
-
-    # Refresh the session with updated user data
     request.session[AUTH_SESS_KEY] = user.to_auth_ctx().model_dump()
 
     return UserSchema.from_user(user)

@@ -33,8 +33,8 @@ from app.auth.ctx import get_auth_ctx, must_get_auth_ctx
 from app.auth.session import get_oauth_sess_key
 from app.users.identity import AuthSchema
 from app.users.identity import Identity as AppIdentity
-from app.users.user import LanguageEnum, ThemeEnum, UserCreate
 from app.users.user import User as AppUser
+from app.users.user import UserCreate
 from tests.conftest import dep
 from tests.session import sess_client
 
@@ -249,8 +249,6 @@ def test__auth__get_user(
     assert user_data.uuid == app_user.uuid
     assert user_data.first_name == app_user.first_name
     assert user_data.last_name == app_user.last_name
-    assert user_data.language == app_user.language
-    assert user_data.theme == app_user.theme
 
 
 def test__auth__get_token(
@@ -308,99 +306,6 @@ def test__auth__get_token__missing_key(
     resp = client.post("/api/v1/oauth/token/", json={"identity_id": "1"})
 
     assert resp.status_code == 403, resp.text
-
-
-def test__auth__update_user_metadata__success(
-    deps: Deps,
-    webapp: FastAPI,
-    client: TestClient,
-    auth_ctx: AuthCtx[Metadata],
-    app_user: AppUser,
-) -> None:
-    """PUT /user/metadata/ updates language and/or theme and returns updated user."""
-    updated_user = app_user.model_copy(
-        update={"language": LanguageEnum.ja, "theme": ThemeEnum.dark}
-    )
-    deps.user_repo.get_user.return_value = app_user  # type: ignore[attr-defined]
-    deps.user_repo.update_user_metadata = AsyncMock(return_value=updated_user)  # type: ignore[method-assign]
-    webapp.dependency_overrides[must_get_auth_ctx] = dep(auth_ctx)
-
-    resp = client.put(
-        "/api/v1/user/metadata/",
-        json={"language": "ja", "theme": "dark"},
-    )
-    assert resp.status_code == 200, resp.text
-
-    data = resp.json()
-    user_data = UserSchema(**data)
-    assert user_data.language == LanguageEnum.ja
-    assert user_data.theme == ThemeEnum.dark
-    deps.user_repo.update_user_metadata.assert_called_once()
-
-
-def test__auth__update_user_metadata__partial_update(
-    deps: Deps,
-    webapp: FastAPI,
-    client: TestClient,
-    auth_ctx: AuthCtx[Metadata],
-    app_user: AppUser,
-) -> None:
-    """PUT /user/metadata/ with only language updates just language."""
-    updated_user = app_user.model_copy(update={"language": LanguageEnum.fr})
-    deps.user_repo.get_user.return_value = app_user  # type: ignore[attr-defined]
-    deps.user_repo.update_user_metadata = AsyncMock(return_value=updated_user)  # type: ignore[method-assign]
-    webapp.dependency_overrides[must_get_auth_ctx] = dep(auth_ctx)
-
-    resp = client.put("/api/v1/user/metadata/", json={"language": "fr"})
-    assert resp.status_code == 200, resp.text
-
-    data = resp.json()
-    user_data = UserSchema(**data)
-    assert user_data.language == LanguageEnum.fr
-
-
-def test__auth__update_user_metadata__empty_payload_returns_current_user(
-    deps: Deps,
-    webapp: FastAPI,
-    client: TestClient,
-    auth_ctx: AuthCtx[Metadata],
-    app_user: AppUser,
-) -> None:
-    """PUT /user/metadata/ with empty payload returns current user without calling update."""
-    deps.user_repo.get_user.return_value = app_user  # type: ignore[attr-defined]
-    update_mock = AsyncMock()
-    deps.user_repo.update_user_metadata = update_mock  # type: ignore[method-assign]
-    webapp.dependency_overrides[must_get_auth_ctx] = dep(auth_ctx)
-
-    resp = client.put("/api/v1/user/metadata/", json={})
-    assert resp.status_code == 200, resp.text
-
-    data = resp.json()
-    user_data = UserSchema(**data)
-    assert user_data.language == app_user.language
-    assert user_data.theme == app_user.theme
-    update_mock.assert_not_called()
-
-
-def test__auth__update_user_metadata__unauthorized(
-    webapp: FastAPI,
-    client: TestClient,
-) -> None:
-    """PUT /user/metadata/ returns 401 when not authenticated."""
-    resp = client.put(
-        "/api/v1/user/metadata/",
-        json={"language": "ja"},
-    )
-    assert resp.status_code == 401, resp.text
-
-
-def test__auth__get_user__unauthorized(
-    webapp: FastAPI,
-    client: TestClient,
-) -> None:
-    """GET /user/ returns 401 when not authenticated."""
-    resp = client.get("/api/v1/user/")
-    assert resp.status_code == 401, resp.text
 
 
 def test__auth__logout(

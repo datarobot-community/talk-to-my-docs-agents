@@ -126,7 +126,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
             className={cn(
                 // Base styles
                 `
-          inline-flex cursor-pointer items-center justify-center gap-1.5 text-sm font-medium transition-colors select-none
+          inline-flex cursor-pointer items-center justify-center text-sm font-medium transition-colors select-none
           disabled:cursor-default
         `,
                 // Default variant styles

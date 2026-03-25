@@ -27,16 +27,15 @@ import { useCurrentUser } from '@/api/auth/hooks.ts';
 import { Toaster } from './components/ui/toast';
 import { RenameChatModal } from '@/components/custom/rename-chat-modal.tsx';
 import { DeleteChatModal } from '@/components/custom/delete-chat-modal.tsx';
-import { saveLanguage, useTranslation } from '@/lib/i18n';
+import { useTranslation } from '@/lib/i18n';
 
 function App() {
-    const { changeLanguage } = useTranslation();
     const {
         data: availableLlmCatalog,
         isLoading: isLlmCatalogLoading,
         isFetched: isLlmCatalogFetched,
     } = useLlmCatalog();
-    const { data: user, isLoading: isUserLoading } = useCurrentUser();
+    const { isLoading: isUserLoading } = useCurrentUser();
     const { selectedLlmModel, setSelectedLlmModel, setAvailableLlmModels, availableLlmModels } =
         useAppState();
     useEffect(() => {
@@ -54,13 +53,6 @@ function App() {
         isLlmCatalogFetched,
         availableLlmModels,
     ]);
-
-    useEffect(() => {
-        if (user) {
-            saveLanguage(user.language);
-            changeLanguage(user.language);
-        }
-    }, [user?.language, changeLanguage]);
 
     return (
         <SidebarProvider>

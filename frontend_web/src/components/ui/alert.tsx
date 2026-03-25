@@ -24,8 +24,8 @@ const alertVariants = cva(
           [&>svg]:text-primary
         `,
                 [ALERT_VARIANT.destructive]: `
-          border-destructive-foreground
-          [&>svg]:text-destructive-foreground
+          border-[color-mix(in_srgb,var(--destructive)_75%,white)]
+          [&>svg]:text-[color-mix(in_srgb,var(--destructive)_75%,white)]
         `,
                 [ALERT_VARIANT.warning]: `
           border-warning/75

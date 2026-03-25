@@ -12,13 +12,6 @@ export interface ExternalFilesResponse {
 export interface ConnectedSource {
     id: string;
     name: string;
-    type: 'google' | 'box' | 'sharepoint';
+    type: 'google' | 'box';
     isConnected: boolean;
-}
-
-// SharePoint navigation state for file IDs
-export interface SharePointNavState {
-    siteId?: string;
-    driveId?: string;
-    folderId?: string;
 }

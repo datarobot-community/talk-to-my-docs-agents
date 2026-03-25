@@ -1,16 +1,18 @@
 import { lazy } from 'react';
-import { Navigate, RouteObject } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 
 import { KnowledgeBases } from './pages/KnowledgeBases';
 import { KnowledgeBaseFormPage } from './pages/KnowledgeBaseForm';
 import { SettingsLayout } from './pages/SettingsLayout';
+import { SettingsSources } from './pages/SettingsSources';
+import { SettingsChats } from './pages/SettingsChats';
 import { PATHS } from '@/constants/paths';
 
 // Lazy-loaded pages
 const ChatPage = lazy(() => import('./pages/Chat'));
 const OAuthCallback = lazy(() => import('./pages/OAuthCallback'));
 
-export const appRoutes: RouteObject[] = [
+export const appRoutes = [
     { path: PATHS.CHAT, element: <ChatPage /> },
     { path: PATHS.CHAT_PAGE, element: <ChatPage /> },
     { path: PATHS.KNOWLEDGE_BASES, element: <KnowledgeBases /> },
@@ -20,10 +22,10 @@ export const appRoutes: RouteObject[] = [
     {
         path: PATHS.SETTINGS.ROOT,
         element: <SettingsLayout />,
-        // Preserve children routes for redirects
         children: [
-            { path: 'chats', element: <Navigate to={PATHS.SETTINGS.ROOT} replace /> },
-            { path: 'sources', element: <Navigate to={PATHS.SETTINGS.ROOT} replace /> },
+            { index: true, element: <Navigate to="sources" replace /> },
+            { path: 'chats', element: <SettingsChats /> },
+            { path: 'sources', element: <SettingsSources /> },
         ],
     },
     { path: PATHS.OAUTH_CB, element: <OAuthCallback /> },

@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- User theme and language preferences. Users can set display language and theme.
-
-### Changed
-
-- Settings page restructured: App Settings now includes Display (language, theme) and Data connections in a single view.
-
 ## [11.5.2] - 2026-02-13
 
 ### Added

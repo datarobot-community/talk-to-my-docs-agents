@@ -9,10 +9,3 @@ export async function getCurrentUser(signal?: AbortSignal): Promise<IUser> {
 export async function logout(): Promise<void> {
     await apiClient.post('/v1/logout/');
 }
-
-export async function updateUserMetadata(data: {
-    language?: string;
-    theme?: string;
-}): Promise<IUser> {
-    return apiClient.put('/v1/user/metadata/', data).then(response => response.data);
-}

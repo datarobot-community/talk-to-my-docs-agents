@@ -39,7 +39,6 @@ class ProviderType(str, Enum):
     EXTERNAL_EMAIL = "datarobot_ext_email"
     GOOGLE = "google"
     BOX = "box"
-    SHAREPOINT = "sharepoint"
 
 
 class Identity(SQLModel, table=True):

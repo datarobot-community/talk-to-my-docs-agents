@@ -5,7 +5,7 @@ description = "Implementation of agent_retrieval_agent"
 readme = "README.md"
 requires-python = ">=3.10, <3.13"
 dependencies = [
-    "datarobot-genai[crewai]>=0.3.2,<0.4.0",
+    "datarobot-genai[crewai]>=0.2.3,<0.3.0",
     "datarobot-moderations>=11.2.4,<11.3.0",
     "datarobot-drum>=1.17.5,<1.18.0",
     "datarobot-mlops>=11.1.0",

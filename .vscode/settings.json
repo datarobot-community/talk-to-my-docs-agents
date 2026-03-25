@@ -8,28 +8,5 @@
     },
     "[markdown]": {
         "editor.formatOnSave": false
-    },
-    "python-envs.pythonProjects": [
-        {
-            "envManager": "ms-python.python:venv",
-            "packageManager": "ms-python.python:pip",
-            "path": "${workspaceFolder}/web/.venv/bin/python"
-        },
-        {
-            "envManager": "ms-python.python:venv",
-            "packageManager": "ms-python.python:pip",
-            "path": "${workspaceFolder}/core/.venv/bin/python"
-        },
-        {
-            "envManager": "ms-python.python:venv",
-            "packageManager": "ms-python.python:pip",
-            "path": "${workspaceFolder}/infra/.venv/bin/python"
-        },
-        {
-            "envManager": "ms-python.python:venv",
-            "packageManager": "ms-python.python:pip",
-            "path": "${workspaceFolder}/agent_retrieval_agent/.venv/bin/python"
-        }
-    ],
-    "python-envs.defaultEnvManager": "ms-python.python:venv"
+    }
 }

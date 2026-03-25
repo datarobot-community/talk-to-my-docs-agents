@@ -1,4 +1,4 @@
-export type IOAuthProviderType = 'google' | 'box' | 'sharepoint';
+export type IOAuthProviderType = 'google' | 'box';
 export interface IOAuthProvider {
     id: string;
     name: string;

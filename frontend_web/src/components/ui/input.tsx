@@ -16,7 +16,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<'input'>>(
             focus:border-accent
             disabled:cursor-not-allowed disabled:border-border/20
             placeholder:disabled:text-muted-foreground/50
-            aria-invalid:border-destructive-foreground
+            aria-invalid:border-destructive
             md:text-sm
           `,
                     className

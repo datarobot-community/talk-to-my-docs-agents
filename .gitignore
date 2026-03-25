@@ -192,12 +192,12 @@ tmp
 # No locking for npm deps:
 package-lock.json
 
+# Pulumi output from the latest stack apply
+pulumi_config.json
 
 # DataRobot CLI stuff:
 #  .dr/state contains user-specific history and audit-trail while working with the CLI
 .datarobot/state/
-
-pulumi_config.json
 .datarobot/cli/state.yaml
 
 # Temporary files produced by dr

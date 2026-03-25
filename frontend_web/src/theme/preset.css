@@ -24,7 +24,6 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
-    --color-destructive-foreground: var(--destructive-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -51,14 +50,13 @@
     --foreground: var(--alpine-light-10);
     --primary: var(--alpine-light-10);
     --primary-foreground: var(--alpine-light-100);
-    --secondary: var(--purple-10);
+    --secondary: var(--purple-0);
     --secondary-foreground: var(--alpine-light-20);
     --muted: var(--alpine-light-60);
     --muted-foreground: var(--alpine-light-30);
-    --accent: var(--purple-60);
+    --accent: var(--purple-70);
     --accent-foreground: var(--purple-70);
     --destructive: var(--red-70);
-    --destructive-foreground: var(--red-70);
     --ring: var(--alpine-light-0);
     --border: var(--alpine-light-50);
     --input: var(--alpine-light-100);
@@ -69,9 +67,9 @@
 
     --sidebar: var(--alpine-light-100);
     --sidebar-foreground: var(--alpine-light-10);
-    --sidebar-primary: var(--purple-0);
+    --sidebar-primary: var(--purple-10);
     --sidebar-primary-foreground: var(--alpine-light-20);
-    --sidebar-accent: var(--purple-10);
+    --sidebar-accent: var(--purple-0);
     --sidebar-accent-foreground: var(--alpine-light-10);
     --sidebar-border: var(--alpine-light-60);
     --sidebar-ring: var(--alpine-light-0);
@@ -91,15 +89,14 @@
     --background: var(--midnight-gray-90);
     --foreground: var(--midnight-gray-10);
     --primary: var(--midnight-gray-0);
-    --secondary: var(--midnight-gray-50);
+    --secondary: var(--midnight-gray-55);
     --secondary-foreground: var(--midnight-gray-20);
     --primary-foreground: var(--midnight-gray-90);
     --muted: var(--midnight-gray-50);
     --muted-foreground: var(--midnight-gray-30);
-    --accent: var(--purple-50);
+    --accent: var(--purple-40);
     --accent-foreground: var(--purple-40);
     --destructive: var(--red-70);
-    --destructive-foreground: var(--red-40);
     --ring: var(--midnight-gray-0);
     --border: var(--midnight-gray-50);
     --input: var(--midnight-gray-60);
@@ -110,7 +107,7 @@
 
     --sidebar: var(--midnight-gray-80);
     --sidebar-foreground: var(--midnight-gray-10);
-    --sidebar-primary: var(--midnight-gray-60);
+    --sidebar-primary: var(--midnight-gray-50);
     --sidebar-primary-foreground: var(--midnight-gray-20);
     --sidebar-accent: var(--midnight-gray-55);
     --sidebar-accent-foreground: var(--midnight-gray-10);

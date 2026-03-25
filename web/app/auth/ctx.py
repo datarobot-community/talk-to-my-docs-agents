@@ -31,7 +31,7 @@ from app.users.identity import (
     ProviderType,
 )
 from app.users.tokens import Tokens
-from app.users.user import LanguageEnum, UserCreate, UserRepository
+from app.users.user import UserCreate, UserRepository
 
 if TYPE_CHECKING:
     from app import Config
@@ -170,7 +170,6 @@ async def get_auth_ctx(
                         first_name=user_profile.given_name,
                         last_name=user_profile.family_name,
                         profile_image_url=user_profile.photo_url,
-                        language=LanguageEnum.from_locale(user_profile.locale),
                     ),
                 )
             except IntegrityError:

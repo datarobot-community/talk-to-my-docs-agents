@@ -35,7 +35,7 @@ from app.auth.ctx import (
     get_datarobot_ctx,
 )
 from app.users.identity import AuthSchema, IdentityCreate, ProviderType
-from app.users.user import LanguageEnum, UserCreate
+from app.users.user import UserCreate
 
 
 async def test__get_auth_ctx__new_visit__dr_user(
@@ -64,38 +64,6 @@ async def test__get_auth_ctx__new_visit__dr_user(
     assert identity.type == AuthSchema.DATAROBOT
     assert identity.provider_type == ProviderType.DATAROBOT_USER
     assert identity.provider_user_id == dr_user.id
-
-
-async def test__get_auth_ctx__new_visit__dr_user__language_from_locale(
-    db_deps: Deps,
-) -> None:
-    """New user created via get_auth_ctx gets language from user_profile.locale (DRUser.lang)."""
-    req = AsyncMock(spec=Request)
-    req.session = {}
-    req.app.state.deps = db_deps
-
-    dr_user_ja = DRUser(
-        id="61092ffc5f851383dd782b31",
-        org_id="57e43914d75f160c3bac26f6",
-        tenant_id="7a88e3bd-c606-4f16-8c7b-ccde5dd413f1",
-        email="yuki.tanaka@example.com",
-        first_name="Yuki",
-        last_name="Tanaka",
-        lang="ja",
-        feature_flags={},
-    )
-    db_deps.api_key_validator.validate.return_value = dr_user_ja  # type: ignore[attr-defined]
-
-    dr_ctx = DRAppCtx(api_key="test-scoped-api-key")
-
-    auth_ctx = await get_auth_ctx(req, dr_ctx)
-
-    assert auth_ctx
-    assert auth_ctx.user.email == dr_user_ja.email
-
-    user = await db_deps.user_repo.get_user(user_id=int(auth_ctx.user.id))
-    assert user is not None
-    assert user.language == LanguageEnum.ja
 
 
 async def test__get_auth_ctx__new_visit__ext_email(db_deps: Deps) -> None:
