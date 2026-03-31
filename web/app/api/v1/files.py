@@ -50,6 +50,10 @@ files_router = APIRouter(tags=["Files"])
 GDRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 BOX_ROOT_FOLDER_ID = "0"
 GOOGLE_MAX_PAGES = 10
+SHAREPOINT_MAX_ITEMS = 200
+
+# Microsoft Graph API base URL
+MICROSOFT_GRAPH_API = "https://graph.microsoft.com/v1.0"
 
 # Google Apps MIME types that can be exported to supported formats
 GOOGLE_APPS_EXPORTABLE = {
@@ -317,6 +321,298 @@ async def get_box_files(
     return files
 
 
+@files_router.get(
+    "/docs/sharepoint/files/",
+    responses={401: {"model": ErrorSchema}, 409: {"model": ErrorSchema}},
+)
+async def get_sharepoint_files(
+    request: Request,
+    site_id: str | None = None,
+    drive_id: str | None = None,
+    folder_id: str | None = None,
+    token_data: OAuthToken = Depends(get_access_token(ProviderType.SHAREPOINT)),
+    auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx),
+) -> FilesListSchema:
+    """
+    List files from SharePoint/OneDrive using Microsoft Graph API.
+
+    - If no parameters: lists user's drives (OneDrive + SharePoint document libraries)
+    - If site_id + drive_id (no folder_id): lists root items in that drive
+    - If site_id + drive_id + folder_id: lists items in that folder
+
+    Note: site_id can be "personal" for OneDrive or an actual SharePoint site ID.
+    """
+    logger.debug(
+        "SharePoint files request",
+        extra={
+            "site_id": site_id,
+            "drive_id": drive_id,
+            "folder_id": folder_id,
+            "user_id": auth_ctx.user.id,
+        },
+    )
+
+    files: list[File] = []
+
+    if not token_data.access_token:
+        logger.error(
+            "Invalid or missing SharePoint access token",
+            extra={"token_data": token_data},
+        )
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired SharePoint access token"
+        )
+
+    headers = {"Authorization": f"Bearer {token_data.access_token}"}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            if not site_id:
+                # Show two top-level options: Quick access drives + Browse all sites
+                logger.debug("Fetching top-level SharePoint navigation")
+
+                # First, add a "Browse Sites" option
+                files.append(
+                    File(
+                        id="browse:sites",
+                        type=FileType.FOLDER,
+                        name="📁 Browse SharePoint Sites",
+                        mime_type="application/vnd.sharepoint.sites",
+                    )
+                )
+
+                # Then list user's quick-access drives
+                response = await client.get(
+                    f"{MICROSOFT_GRAPH_API}/me/drives",
+                    headers=headers,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                logger.debug(
+                    "Received drives from Microsoft Graph",
+                    extra={"drive_count": len(data.get("value", []))},
+                )
+
+                for drive in data.get("value", []):
+                    current_drive_id = drive["id"]
+                    drive_name = drive.get("name", "Drive")
+
+                    # Get the site ID if available (may be None for personal OneDrive)
+                    # Note: sharePointIds.siteId returns only a GUID, but Graph API /sites/{site-id}
+                    # endpoints require the compound format {hostname},{siteCollectionId},{webId}.
+                    # Using the GUID alone causes 404 errors. Instead, use "personal" as a sentinel
+                    # to indicate we should use /drives/{drive_id} endpoints (no site context).
+                    site_info = drive.get("sharePointIds", {})
+                    site_id_value = site_info.get("siteId", "")
+
+                    # For drives, we'll encode both site and drive ID in the ID field
+                    # Use "personal" sentinel for all quick-access drives (proper site ID unavailable)
+                    if site_id_value and "," in site_id_value:
+                        # Valid compound site ID from browse path
+                        file_id = f"drive:{site_id_value}:{current_drive_id}"
+                    else:
+                        # Personal OneDrive or SharePoint drive without proper site context
+                        file_id = f"drive:personal:{current_drive_id}"
+
+                    files.append(
+                        File(
+                            id=file_id,
+                            type=FileType.FOLDER,
+                            name=drive_name,
+                            mime_type="application/vnd.sharepoint.drive",
+                        )
+                    )
+
+            elif site_id == "browse":
+                # List all SharePoint sites the user has access to
+                logger.debug("Fetching SharePoint sites")
+                response = await client.get(
+                    f"{MICROSOFT_GRAPH_API}/sites?search=*&$top={SHAREPOINT_MAX_ITEMS}",
+                    headers=headers,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                logger.debug(
+                    "Received SharePoint sites",
+                    extra={"site_count": len(data.get("value", []))},
+                )
+
+                for site in data.get("value", []):
+                    files.append(
+                        File(
+                            id=f"site:{site['id']}",
+                            type=FileType.FOLDER,
+                            name=site.get("displayName") or site.get("name", ""),
+                            mime_type="application/vnd.sharepoint.site",
+                        )
+                    )
+
+            elif site_id and not drive_id:
+                # List drives (document libraries) in the site
+                # "personal" is a synthetic sentinel, not a valid site ID - skip this branch
+                if site_id == "personal":
+                    logger.debug(
+                        "Skipping site drives listing for personal OneDrive",
+                        extra={"site_id": site_id},
+                    )
+                    # Personal OneDrive doesn't have a concept of listing drives for a site
+                    # The back button should never navigate here; return empty to the root
+                else:
+                    logger.debug(
+                        "Fetching drives for site",
+                        extra={"site_id": site_id},
+                    )
+                    response = await client.get(
+                        f"{MICROSOFT_GRAPH_API}/sites/{site_id}/drives",
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                    logger.debug(
+                        "Received drives for site",
+                        extra={
+                            "site_id": site_id,
+                            "drive_count": len(data.get("value", [])),
+                        },
+                    )
+
+                    for drive in data.get("value", []):
+                        files.append(
+                            File(
+                                id=f"drive:{site_id}:{drive['id']}",
+                                type=FileType.FOLDER,
+                                name=drive.get("name", ""),
+                                mime_type="application/vnd.sharepoint.drive",
+                            )
+                        )
+
+            elif site_id and drive_id and not folder_id:
+                # List root items in the drive
+                # Handle personal OneDrive (site_id = "personal") vs SharePoint drives
+                if site_id == "personal":
+                    url = f"{MICROSOFT_GRAPH_API}/drives/{drive_id}/root/children?$top={SHAREPOINT_MAX_ITEMS}"
+                else:
+                    url = f"{MICROSOFT_GRAPH_API}/sites/{site_id}/drives/{drive_id}/root/children?$top={SHAREPOINT_MAX_ITEMS}"
+
+                logger.debug(
+                    "Fetching drive root items",
+                    extra={
+                        "site_id": site_id,
+                        "drive_id": drive_id,
+                        "url": url,
+                    },
+                )
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+
+                logger.debug(
+                    "Received drive root items",
+                    extra={
+                        "site_id": site_id,
+                        "drive_id": drive_id,
+                        "item_count": len(data.get("value", [])),
+                    },
+                )
+
+                for item in data.get("value", []):
+                    is_folder = "folder" in item
+                    filename = item.get("name", "")
+
+                    # Skip unsupported file types (but always show folders)
+                    if not is_folder and not _is_supported_file_type(filename):
+                        continue
+
+                    files.append(
+                        File(
+                            id=f"item:{site_id}:{drive_id}:{item['id']}",
+                            type=FileType.FOLDER if is_folder else FileType.FILE,
+                            name=filename,
+                            mime_type=item.get("file", {}).get("mimeType"),
+                        )
+                    )
+
+            elif site_id and drive_id and folder_id:
+                # List items in a folder
+                # Handle personal OneDrive (site_id = "personal") vs SharePoint drives
+                if site_id == "personal":
+                    url = f"{MICROSOFT_GRAPH_API}/drives/{drive_id}/items/{folder_id}/children?$top={SHAREPOINT_MAX_ITEMS}"
+                else:
+                    url = f"{MICROSOFT_GRAPH_API}/sites/{site_id}/drives/{drive_id}/items/{folder_id}/children?$top={SHAREPOINT_MAX_ITEMS}"
+
+                logger.debug(
+                    "Fetching folder items",
+                    extra={
+                        "site_id": site_id,
+                        "drive_id": drive_id,
+                        "folder_id": folder_id,
+                        "url": url,
+                    },
+                )
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+
+                logger.debug(
+                    "Received folder items",
+                    extra={
+                        "site_id": site_id,
+                        "drive_id": drive_id,
+                        "folder_id": folder_id,
+                        "item_count": len(data.get("value", [])),
+                    },
+                )
+
+                for item in data.get("value", []):
+                    is_folder = "folder" in item
+                    filename = item.get("name", "")
+
+                    # Skip unsupported file types (but always show folders)
+                    if not is_folder and not _is_supported_file_type(filename):
+                        continue
+
+                    files.append(
+                        File(
+                            id=f"item:{site_id}:{drive_id}:{item['id']}",
+                            type=FileType.FOLDER if is_folder else FileType.FILE,
+                            name=filename,
+                            mime_type=item.get("file", {}).get("mimeType"),
+                        )
+                    )
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            logger.warning(
+                "SharePoint API auth error - token may have been revoked",
+                extra={"error": str(e)},
+            )
+            await _mark_identity_needs_reauth(
+                request, auth_ctx, ProviderType.SHAREPOINT.value
+            )
+            err = ErrorSchema(
+                code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+                message="Your SharePoint connection has expired or been revoked. Please reconnect your account in Settings.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
+            )
+        raise
+
+    logger.debug(
+        "SharePoint files response",
+        extra={
+            "file_count": len(files),
+            "site_id": site_id,
+            "drive_id": drive_id,
+            "folder_id": folder_id,
+        },
+    )
+    return FilesListSchema(files=files)
+
+
 # File Management Endpoints
 
 
@@ -397,6 +693,18 @@ class BoxUploadRequestSchema(BaseModel):
     """Schema for Box file upload request."""
 
     file_ids: list[str] = Field(..., description="List of Box file IDs to upload")
+    knowledge_base_uuid: uuidpkg.UUID | None = Field(
+        default=None, description="Optional base UUID to attach files to"
+    )
+
+
+class SharePointUploadRequestSchema(BaseModel):
+    """Schema for SharePoint file upload request."""
+
+    file_ids: list[str] = Field(
+        ...,
+        description="List of SharePoint file IDs in format 'item:site_id:drive_id:item_id'",
+    )
     knowledge_base_uuid: uuidpkg.UUID | None = Field(
         default=None, description="Optional base UUID to attach files to"
     )
@@ -1115,6 +1423,274 @@ async def upload_box_files(
                     "error": f"Failed to import file from Box: {error_message}",
                 }
             )
+
+    # Check if any uploads failed and return appropriate status code
+    failed_files = [
+        result for result in results if isinstance(result, dict) and "error" in result
+    ]
+    if failed_files:
+        # If all files failed, return 500
+        if len(failed_files) == len(results):
+            error_messages = [
+                result["error"]
+                for result in failed_files
+                if isinstance(result, dict) and "error" in result
+            ]
+            err = ErrorSchema(
+                code=ErrorCodes.UNKNOWN_ERROR,
+                message=f"All file uploads failed. Errors: {error_messages}",
+            )
+            raise HTTPException(status_code=500, detail=err.model_dump())
+
+    return results
+
+
+@files_router.post("/files/sharepoint/upload", responses={401: {"model": ErrorSchema}})
+async def upload_sharepoint_files(
+    request: Request,
+    payload: SharePointUploadRequestSchema,
+    auth_ctx: AuthCtx[Metadata] = Depends(must_get_auth_ctx),
+    token_data: OAuthToken = Depends(get_access_token(ProviderType.SHAREPOINT)),
+) -> list[FileSchema | dict[str, Any]]:
+    """
+    Import files from SharePoint by downloading them and optionally attach them to a base.
+    Returns a list of results for each file (either FileSchema for success or error dict).
+
+    File IDs should be in format: 'item:site_id:drive_id:item_id'
+    """
+    file_ids = payload.file_ids
+    knowledge_base_uuid = payload.knowledge_base_uuid
+
+    logger.debug(
+        "SharePoint file upload request",
+        extra={
+            "file_count": len(file_ids),
+            "knowledge_base_uuid": knowledge_base_uuid,
+            "user_id": auth_ctx.user.id,
+        },
+    )
+
+    if not file_ids:
+        raise HTTPException(status_code=400, detail="No file IDs provided")
+
+    file_repo = request.app.state.deps.file_repo
+    user_repo = request.app.state.deps.user_repo
+
+    # Get current user's UUID
+    current_user = await user_repo.get_user(user_id=int(auth_ctx.user.id))
+    if not current_user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    user_uuid = current_user.uuid
+
+    # Validate base if provided
+    knowledge_base_id = None
+    knowledge_base = None
+    knowledge_base_repo = None
+    if knowledge_base_uuid:
+        knowledge_base_repo = request.app.state.deps.knowledge_base_repo
+        knowledge_base = await knowledge_base_repo.get_knowledge_base(
+            current_user,
+            knowledge_base_uuid=knowledge_base_uuid,
+        )
+        if not knowledge_base or knowledge_base.owner_id != int(auth_ctx.user.id):
+            err = ErrorSchema(
+                code=ErrorCodes.UNKNOWN_ERROR,
+                message="Base not found or access denied",
+            )
+            raise HTTPException(status_code=404, detail=err.model_dump())
+        knowledge_base_id = knowledge_base.id
+
+    headers = {"Authorization": f"Bearer {token_data.access_token}"}
+
+    # Set up file directory path once for all files
+    if knowledge_base:
+        # Use base path for files attached to a base (already fetched above)
+        file_dir = (
+            pathlib.Path(request.app.state.deps.upload_path) / knowledge_base.path
+        )
+    else:
+        # Use user's UUID for standalone files
+        file_dir = pathlib.Path(request.app.state.deps.upload_path) / str(user_uuid)
+
+    fs = get_file_system()
+    # Ensure directory exists
+    try:
+        fs.mkdir(str(file_dir), create_parents=True)
+    except FileExistsError:
+        pass
+
+    results: list[FileSchema | dict[str, Any]] = []
+
+    async with httpx.AsyncClient() as client:
+        for file_id in file_ids:
+            try:
+                # Parse file ID format: 'item:site_id:drive_id:item_id'
+                parts = file_id.split(":")
+                if len(parts) != 4 or parts[0] != "item":
+                    results.append(
+                        {
+                            "file_id": file_id,
+                            "error": "Invalid file ID format. Expected 'item:site_id:drive_id:item_id'",
+                        }
+                    )
+                    continue
+
+                _, site_id, drive_id, item_id = parts
+
+                logger.debug(
+                    "Processing SharePoint file",
+                    extra={
+                        "file_id": file_id,
+                        "site_id": site_id,
+                        "drive_id": drive_id,
+                        "item_id": item_id,
+                    },
+                )
+
+                # Get file metadata
+                # Handle personal OneDrive (site_id = "personal") vs SharePoint drives
+                if site_id == "personal":
+                    metadata_url = (
+                        f"{MICROSOFT_GRAPH_API}/drives/{drive_id}/items/{item_id}"
+                    )
+                else:
+                    metadata_url = f"{MICROSOFT_GRAPH_API}/sites/{site_id}/drives/{drive_id}/items/{item_id}"
+
+                metadata_response = await client.get(metadata_url, headers=headers)
+                metadata_response.raise_for_status()
+                metadata = metadata_response.json()
+
+                filename = metadata.get("name", f"sharepoint_file_{item_id}")
+                mime_type = metadata.get("file", {}).get("mimeType")
+
+                # Check file extension
+                file_extension = pathlib.Path(filename).suffix.lower().lstrip(".")
+                if file_extension not in document_loader.SUPPORTED_FILE_TYPES:
+                    results.append(
+                        {
+                            "filename": filename,
+                            "error": f"Unsupported file type: {file_extension}",
+                        }
+                    )
+                    continue
+
+                # Download file content
+                download_url = metadata.get("@microsoft.graph.downloadUrl")
+                if not download_url:
+                    # Fallback: construct download URL
+                    # Handle personal OneDrive (site_id = "personal") vs SharePoint drives
+                    if site_id == "personal":
+                        download_url = f"{MICROSOFT_GRAPH_API}/drives/{drive_id}/items/{item_id}/content"
+                    else:
+                        download_url = f"{MICROSOFT_GRAPH_API}/sites/{site_id}/drives/{drive_id}/items/{item_id}/content"
+
+                download_response = await client.get(
+                    download_url,
+                    headers=headers,
+                    follow_redirects=True,
+                )
+                download_response.raise_for_status()
+                file_content = download_response.content
+
+                logger.debug(
+                    "Downloaded SharePoint file",
+                    extra={
+                        "file_id": file_id,
+                        "filename": filename,
+                        "size_bytes": len(file_content),
+                    },
+                )
+
+                file_path = str(file_dir / filename)
+
+                # Save the file
+                with fs.open(file_path, "wb") as buffer:
+                    buffer.write(file_content)
+
+                # Create file record in database
+                file_data = FileCreate(
+                    filename=filename,
+                    source="sharepoint",
+                    file_path=file_path,
+                    external_id=file_id,
+                    mime_type=mime_type,
+                    size_bytes=len(file_content),
+                    knowledge_base_id=knowledge_base_id,
+                )
+
+                db_file = await file_repo.create_file(
+                    file_data, owner_id=int(auth_ctx.user.id)
+                )
+
+                # Encode the document in the background (don't wait for it)
+                asyncio.create_task(
+                    get_or_create_encoded_content(
+                        file=db_file,
+                        file_repo=file_repo,
+                        knowledge_base=knowledge_base,
+                        knowledge_base_repo=knowledge_base_repo,
+                    )
+                )
+
+                results.append(FileSchema.from_file(db_file, owner_uuid=user_uuid))
+
+                logger.debug(
+                    "Successfully imported SharePoint file",
+                    extra={
+                        "file_id": file_id,
+                        "db_file_id": db_file.id,
+                        "filename": filename,
+                    },
+                )
+
+            except httpx.HTTPStatusError as e:
+                # Handle auth errors by raising HTTPException (will propagate to FastAPI)
+                if e.response.status_code == 401:
+                    logger.warning(
+                        "SharePoint API auth error during file upload",
+                        extra={"error": str(e), "file_id": file_id},
+                    )
+                    await _mark_identity_needs_reauth(
+                        request, auth_ctx, ProviderType.SHAREPOINT.value
+                    )
+                    err = ErrorSchema(
+                        code=ErrorCodes.OAUTH_REAUTH_REQUIRED,
+                        message="Your SharePoint connection has expired or been revoked. Please reconnect your account in Settings.",
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail=err.model_dump(),
+                    )
+                # For non-auth HTTP errors, add to results instead of raising
+                results.append(
+                    {
+                        "file_id": file_id,
+                        "error": f"Failed to import file from SharePoint: {str(e)}",
+                    }
+                )
+            except Exception as e:
+                logger.exception(
+                    "Failed to upload file from SharePoint", extra={"file_id": file_id}
+                )
+                results.append(
+                    {
+                        "file_id": file_id,
+                        "error": f"Failed to import file from SharePoint: {str(e)}",
+                    }
+                )
+
+    success_count = sum(1 for r in results if isinstance(r, FileSchema))
+    error_count = len(results) - success_count
+
+    logger.debug(
+        "SharePoint file upload complete",
+        extra={
+            "total_files": len(file_ids),
+            "success_count": success_count,
+            "error_count": error_count,
+        },
+    )
 
     # Check if any uploads failed and return appropriate status code
     failed_files = [

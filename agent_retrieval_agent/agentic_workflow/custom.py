@@ -97,7 +97,11 @@ def chat(
 
     # The list of the headers to forward into the Agent and MCP Server.
     incoming_headers = kwargs.get("headers", {}) or {}
-    allowed_headers = {"x-datarobot-api-token", "x-datarobot-api-key"}
+    allowed_headers = {
+        "x-datarobot-api-token",
+        "x-datarobot-api-key",
+        "x-datarobot-identity-token",
+    }
     forwarded_headers = {
         k: v for k, v in incoming_headers.items() if k.lower() in allowed_headers
     }

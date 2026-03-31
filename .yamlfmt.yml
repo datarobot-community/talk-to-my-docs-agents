@@ -10,3 +10,5 @@ formatter:
 gitignore_excludes: true
 exclude:
   - .datarobot/
+  - "**/.venv/**"
+  - "**/node_modules/**"

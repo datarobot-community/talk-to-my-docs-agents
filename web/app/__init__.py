@@ -52,6 +52,12 @@ async def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+@base_router.get("/api/v1/welcome")
+async def welcome() -> dict[str, str]:
+    """Simple API endpoint for demonstration with React"""
+    return {"message": "Hello from Fast API"}
+
+
 def get_app_base_url(api_port: str | None = None) -> str:
     """Get and normalize the application base URL."""
     app_base_url = os.getenv("BASE_PATH", "")
@@ -116,9 +122,12 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         stream_manager = ChatStreamManager()
         app.state.stream_manager = stream_manager
-        async with create_deps(config, deps) as dependencies:
-            app.state.deps = dependencies
-            yield
+        try:
+            async with create_deps(config, deps) as dependencies:
+                app.state.deps = dependencies
+                yield
+        finally:
+            otel.shutdown()
 
     app = FastAPI(title=title, lifespan=lifespan)
 

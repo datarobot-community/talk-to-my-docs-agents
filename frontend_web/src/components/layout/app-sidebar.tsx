@@ -1,17 +1,11 @@
-import { ChevronDown, MessagesSquare, BookOpenText, UserRound } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { MessagesSquare, LibraryBig, UserRound, Settings } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
 import { useTheme } from '@/theme/theme-provider';
 import drLogoDark from '@/assets/DataRobot_black.svg';
 import drLogoLight from '@/assets/DataRobot_white.svg';
 import drIcon from '@/assets/DataRobotLogo_black.svg';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import {
-    DropdownMenu,
-    DropdownMenuTrigger,
-    DropdownMenuContent,
-    DropdownMenuItem,
-} from '@/components/ui/dropdown-menu';
 import {
     Sidebar,
     SidebarContent,
@@ -23,7 +17,6 @@ import {
     SidebarGroup,
 } from '@/components/ui/sidebar';
 import { useSidebar } from '@/hooks';
-import { Button } from '@/components/ui/button.tsx';
 import { ROUTES } from '@/pages/routes';
 import { Separator } from '@/components/ui/separator';
 
@@ -37,7 +30,6 @@ export function AppSidebar() {
     const { t } = useTranslation();
     const { open } = useSidebar();
     const { data: currentUser } = useCurrentUser();
-    const navigate = useNavigate();
     const location = useLocation();
     const { theme } = useTheme();
 
@@ -52,7 +44,12 @@ export function AppSidebar() {
             {
                 title: t('Knowledge Bases'),
                 url: ROUTES.KNOWLEDGE_BASES,
-                icon: BookOpenText,
+                icon: LibraryBig,
+            },
+            {
+                title: t('App Settings'),
+                url: ROUTES.SETTINGS,
+                icon: Settings,
             },
             // {
             //     title: t('Assistants'),
@@ -68,13 +65,6 @@ export function AppSidebar() {
         [t]
     );
 
-    const handleSettingsClick = () => {
-        if (location.pathname.startsWith(PATHS.CHAT)) {
-            navigate(PATHS.SETTINGS.CHATS);
-        } else {
-            navigate(PATHS.SETTINGS.SOURCES);
-        }
-    };
     return (
         <Sidebar collapsible="icon" className="bg-background" data-testid="app-sidebar">
             <SidebarHeader className="h-15 border-b">
@@ -127,52 +117,30 @@ export function AppSidebar() {
                 </SidebarMenu>
             </SidebarContent>
             <SidebarFooter>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <div className="mb-2.5 ml-0.5 flex h-9 w-full gap-1">
-                            <Avatar>
-                                <AvatarFallback>
-                                    {currentUser &&
-                                    currentUser.first_name &&
-                                    currentUser.last_name ? (
-                                        `${currentUser.first_name[0]}${currentUser.last_name[0]}`
-                                    ) : (
-                                        <UserRound />
-                                    )}
-                                </AvatarFallback>
-                            </Avatar>
-                            {open ? (
-                                <Button
-                                    variant="ghost"
-                                    className="flex h-9 w-full flex-1 cursor-pointer items-center justify-between gap-1 px-2 hover:no-underline"
-                                >
-                                    <span>
-                                        {(() => {
-                                            const displayName =
-                                                currentUser &&
-                                                currentUser.first_name &&
-                                                currentUser.last_name
-                                                    ? `${currentUser.first_name} ${currentUser.last_name}`
-                                                    : currentUser?.email || t('User');
-                                            return displayName.length > 20
-                                                ? `${displayName.slice(0, 20)}...`
-                                                : displayName;
-                                        })()}
-                                    </span>
-                                    <ChevronDown className="size-4" />
-                                </Button>
-                            ) : null}
-                        </div>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                            onSelect={handleSettingsClick}
-                            data-testid="app-sidebar-settings-item"
-                        >
-                            {t('Settings')}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                <div className="mb-2.5 ml-0.5 flex h-9 w-full items-center gap-1">
+                    <Avatar>
+                        <AvatarFallback>
+                            {currentUser && currentUser.first_name && currentUser.last_name ? (
+                                `${currentUser.first_name[0]}${currentUser.last_name[0]}`
+                            ) : (
+                                <UserRound />
+                            )}
+                        </AvatarFallback>
+                    </Avatar>
+                    {open && (
+                        <span>
+                            {(() => {
+                                const displayName =
+                                    currentUser && currentUser.first_name && currentUser.last_name
+                                        ? `${currentUser.first_name} ${currentUser.last_name}`
+                                        : currentUser?.email || t('User');
+                                return displayName.length > 20
+                                    ? `${displayName.slice(0, 20)}...`
+                                    : displayName;
+                            })()}
+                        </span>
+                    )}
+                </div>
             </SidebarFooter>
         </Sidebar>
     );

@@ -23,7 +23,7 @@ jobs:
       - name: Checkout
         uses: "actions/checkout@v5"
       - name: Install Task
-        uses: go-task/setup-task@v1
+        uses: go-task/setup-task@v2
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
         with:

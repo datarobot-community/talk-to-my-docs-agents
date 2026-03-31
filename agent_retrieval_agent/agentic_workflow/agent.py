@@ -26,10 +26,7 @@ from datarobot_genai.core.agents.base import (
     extract_user_prompt_content,
     is_streaming,
 )
-from datarobot_genai.crewai.agent import (
-    build_llm,
-)
-from datarobot_genai.crewai.base import CrewAIAgent
+from datarobot_genai.crewai.agent import CrewAIAgent
 from datarobot_genai.crewai.events import CrewAIEventListener
 from openai.types.chat import CompletionCreateParams
 
@@ -114,18 +111,24 @@ class MyAgent(CrewAIAgent):
         Returns:
             LLM: The model to use.
         """
+        api_base = self.litellm_api_base(self.config.llm_deployment_id)
         model = preferred_model or self.default_model
         if auto_model_override and not self.config.use_datarobot_llm_gateway:
             model = self.default_model
         if self.verbose:
             print(f"Using model: {model}")
-        return build_llm(
-            api_base=self.api_base,
-            api_key=self.api_key,
-            model=model,
-            deployment_id=self.config.llm_deployment_id,
-            timeout=self.timeout,
-        )
+
+        config = {
+            "model": model,
+            "api_base": api_base,
+            "api_key": self.api_key,
+            "timeout": self.timeout,
+        }
+
+        if not self.config.use_datarobot_llm_gateway and self._identity_header:
+            config["extra_headers"] = self._identity_header
+
+        return LLM(**config)  # type: ignore[arg-type]
 
     def make_kickoff_inputs(
         self, user_prompt_content: str | dict[str, Any]

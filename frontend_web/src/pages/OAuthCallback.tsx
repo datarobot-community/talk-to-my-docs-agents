@@ -19,7 +19,7 @@ const OAuthCallback = () => {
         if (errorMessage) {
             params.set('error_message', errorMessage);
         }
-        return `${PATHS.SETTINGS.SOURCES}?${params.toString()}`;
+        return `${PATHS.SETTINGS.ROOT}?${params.toString()}`;
     };
 
     const params = new URLSearchParams(location.search);
@@ -45,7 +45,7 @@ const OAuthCallback = () => {
             queryClient.invalidateQueries({ queryKey: authKeys.currentUser });
             // Invalidate OAuth providers in case connection state changed
             queryClient.invalidateQueries({ queryKey: oauthKeys.all });
-            navigate(PATHS.SETTINGS.SOURCES, { replace: true });
+            navigate(PATHS.SETTINGS.ROOT, { replace: true });
         }
         if (isError) {
             // Just show the error message as a string

@@ -1,17 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
-import { useOauthProviders, useAuthorizeProvider } from '@/api/oauth/hooks';
-import { useCurrentUser } from '@/api/auth/hooks';
+import { useOauthProviders, useAuthorizeProvider } from '@/api/oauth/hooks.ts';
+import { useCurrentUser } from '@/api/auth/hooks.ts';
 import { getBaseUrl } from '@/lib/utils.ts';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { PATHS } from '@/constants/paths';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Heading } from '@/components/ui/heading';
+import { Alert, AlertDescription } from '@/components/ui/alert.tsx';
+import { PATHS } from '@/constants/paths.ts';
+import { Skeleton } from '@/components/ui/skeleton.tsx';
+import { Heading } from '@/components/ui/heading.tsx';
 import { useTranslation } from '@/lib/i18n';
-import { ProviderTile, ProviderStatus } from '@/components/custom/provider-tile';
-import { IOAuthProvider } from '@/api/oauth/types';
+import { ProviderTile, ProviderStatus } from '@/components/custom/provider-tile.tsx';
+import { IOAuthProvider } from '@/api/oauth/types.ts';
 
 export const SettingsSources = () => {
     const { t } = useTranslation();
@@ -100,7 +99,7 @@ export const SettingsSources = () => {
     };
 
     return (
-        <ScrollArea className="flex-1">
+        <div className="flex-0">
             {/* Data connections header */}
             <div className="mb-6 border-b border-border pb-2">
                 <Heading level={4}>{t('Data connections')}</Heading>
@@ -165,6 +164,6 @@ export const SettingsSources = () => {
                     ))}
                 </div>
             )}
-        </ScrollArea>
+        </div>
     );
 };

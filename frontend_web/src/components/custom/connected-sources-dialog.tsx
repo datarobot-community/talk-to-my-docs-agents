@@ -3,8 +3,10 @@ import {
     useConnectedSources,
     useGoogleFiles,
     useBoxFiles,
+    useSharePointFiles,
     ExternalFile,
 } from '@/api/external-files';
+import { SharePointNavState } from '@/api/external-files/types';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +28,7 @@ import { AxiosError } from 'axios';
 import { useTranslation } from '@/lib/i18n';
 
 interface ConnectedSourcesDialogProps {
-    onFileSelect: (file: ExternalFile, source: 'google' | 'box') => void;
+    onFileSelect: (file: ExternalFile, source: 'google' | 'box' | 'sharepoint') => void;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     isUploading?: boolean;
@@ -42,9 +44,14 @@ export function ConnectedSourcesDialog({
     const { connectedSources, hasConnectedSources } = useConnectedSources();
     const [selectedGoogleFolder, setSelectedGoogleFolder] = useState<string | undefined>();
     const [selectedBoxFolder, setSelectedBoxFolder] = useState<string>('0');
+    const [sharePointNav, setSharePointNav] = useState<SharePointNavState>({});
     const [googleSearchQuery, setGoogleSearchQuery] = useState<string>('');
     const [boxSearchQuery, setBoxSearchQuery] = useState<string>('');
+    const [sharePointSearchQuery, setSharePointSearchQuery] = useState<string>('');
     const navigate = useNavigate();
+
+    // SharePoint quick-access site IDs that should navigate directly to root
+    const QUICK_ACCESS_SITE_IDS = ['personal', 'quick', 'browse'];
 
     const {
         data: googleFiles,
@@ -63,15 +70,44 @@ export function ConnectedSourcesDialog({
         refetch: refetchBox,
     } = useBoxFiles(selectedBoxFolder, open && connectedSources.some(s => s.type === 'box'));
 
-    const handleFileSelect = (file: ExternalFile, source: 'google' | 'box') => {
+    const {
+        data: sharePointFiles,
+        isLoading: isLoadingSharePoint,
+        error: sharePointError,
+        refetch: refetchSharePoint,
+    } = useSharePointFiles(
+        sharePointNav,
+        open && connectedSources.some(s => s.type === 'sharepoint')
+    );
+
+    const handleFileSelect = (file: ExternalFile, source: 'google' | 'box' | 'sharepoint') => {
         if (file.type === 'folder') {
             // Clear search when navigating to a new folder
             if (source === 'google') {
                 setSelectedGoogleFolder(file.id);
                 setGoogleSearchQuery('');
-            } else {
+            } else if (source === 'box') {
                 setSelectedBoxFolder(file.id);
                 setBoxSearchQuery('');
+            } else if (source === 'sharepoint') {
+                // SharePoint uses hierarchical navigation: browse sites -> site -> drive -> folder
+                setSharePointSearchQuery('');
+                if (file.id === 'browse:sites') {
+                    // Navigating to browse all SharePoint sites
+                    setSharePointNav({ siteId: 'browse' });
+                } else if (file.id.startsWith('site:')) {
+                    // Navigating into a site - show its drives
+                    const siteId = file.id.replace('site:', '');
+                    setSharePointNav({ siteId });
+                } else if (file.id.startsWith('drive:')) {
+                    // Navigating into a drive - show its root contents
+                    const [, siteId, driveId] = file.id.split(':');
+                    setSharePointNav({ siteId, driveId });
+                } else if (file.id.startsWith('item:')) {
+                    // Navigating into a folder
+                    const [, siteId, driveId, folderId] = file.id.split(':');
+                    setSharePointNav({ siteId, driveId, folderId });
+                }
             }
         } else if (file.type === 'file') {
             onFileSelect(file, source);
@@ -80,7 +116,7 @@ export function ConnectedSourcesDialog({
 
     const goToSettings = () => {
         handleDialogClose(false);
-        navigate('/settings/sources');
+        navigate('/settings');
     };
 
     const handleDialogClose = (open: boolean) => {
@@ -88,6 +124,7 @@ export function ConnectedSourcesDialog({
             // Reset search queries when dialog closes
             setGoogleSearchQuery('');
             setBoxSearchQuery('');
+            setSharePointSearchQuery('');
         }
         onOpenChange(open);
     };
@@ -137,11 +174,23 @@ export function ConnectedSourcesDialog({
 
     const renderFileList = (
         files: ExternalFile[] | undefined,
-        source: 'google' | 'box',
+        source: 'google' | 'box' | 'sharepoint',
         isLoading: boolean,
         error: unknown,
         refetch: () => void
     ) => {
+        // Get display name for the source
+        const getSourceDisplayName = (s: 'google' | 'box' | 'sharepoint') => {
+            switch (s) {
+                case 'google':
+                    return 'Google Drive';
+                case 'box':
+                    return 'Box';
+                case 'sharepoint':
+                    return 'SharePoint';
+            }
+        };
+
         // Handle error state
         if (error) {
             const errorMessage = getErrorMessage(error);
@@ -155,7 +204,7 @@ export function ConnectedSourcesDialog({
                             <div>
                                 <p className="mn-label">
                                     {t('Unable to connect to {{source}}', {
-                                        source: source === 'google' ? 'Google Drive' : 'Box',
+                                        source: getSourceDisplayName(source),
                                     })}
                                 </p>
                                 <p className="mt-1 body">{errorMessage}</p>
@@ -191,8 +240,18 @@ export function ConnectedSourcesDialog({
             return <div className="body-secondary p-4 text-center">{t('No files found')}</div>;
         }
 
-        const searchQuery = source === 'google' ? googleSearchQuery : boxSearchQuery;
-        const setSearchQuery = source === 'google' ? setGoogleSearchQuery : setBoxSearchQuery;
+        const searchQuery =
+            source === 'google'
+                ? googleSearchQuery
+                : source === 'box'
+                  ? boxSearchQuery
+                  : sharePointSearchQuery;
+        const setSearchQuery =
+            source === 'google'
+                ? setGoogleSearchQuery
+                : source === 'box'
+                  ? setBoxSearchQuery
+                  : setSharePointSearchQuery;
 
         // Filter files based on search query
         const filteredFiles = files.filter(file =>
@@ -303,7 +362,7 @@ export function ConnectedSourcesDialog({
                             <Heading level={3}>{t('No Connected Sources')}</Heading>
                             <p className="mt-1 body-secondary">
                                 {t(
-                                    'Connect to Google Drive or Box to upload files from your cloud storage.'
+                                    'Connect to Google Drive, Box, or SharePoint to upload files from your cloud storage.'
                                 )}
                             </p>
                         </div>
@@ -318,7 +377,7 @@ export function ConnectedSourcesDialog({
                             className="flex size-full flex-col"
                         >
                             <TabsList
-                                className={`grid w-full ${connectedSources.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} shrink-0`}
+                                className={`grid w-full ${connectedSources.length === 1 ? 'grid-cols-1' : connectedSources.length === 2 ? 'grid-cols-2' : 'grid-cols-3'} shrink-0`}
                             >
                                 {connectedSources.map(source => (
                                     <TabsTrigger key={source.id} value={source.type}>
@@ -360,6 +419,82 @@ export function ConnectedSourcesDialog({
                                                     {t('← Back to root')}
                                                 </Button>
                                             )}
+                                            {source.type === 'sharepoint' &&
+                                                (sharePointNav.siteId ||
+                                                    sharePointNav.driveId ||
+                                                    sharePointNav.folderId) && (
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setSharePointSearchQuery('');
+                                                            if (sharePointNav.folderId) {
+                                                                // Go back to drive root
+                                                                setSharePointNav({
+                                                                    siteId: sharePointNav.siteId,
+                                                                    driveId: sharePointNav.driveId,
+                                                                    folderId: undefined,
+                                                                });
+                                                            } else if (
+                                                                sharePointNav.driveId &&
+                                                                sharePointNav.siteId &&
+                                                                !QUICK_ACCESS_SITE_IDS.includes(
+                                                                    sharePointNav.siteId
+                                                                )
+                                                            ) {
+                                                                // Go back to site's drives list (only for real SharePoint sites)
+                                                                setSharePointNav({
+                                                                    siteId: sharePointNav.siteId,
+                                                                    driveId: undefined,
+                                                                    folderId: undefined,
+                                                                });
+                                                            } else if (
+                                                                sharePointNav.driveId &&
+                                                                sharePointNav.siteId &&
+                                                                QUICK_ACCESS_SITE_IDS.includes(
+                                                                    sharePointNav.siteId
+                                                                )
+                                                            ) {
+                                                                // Quick access drives go directly back to root
+                                                                setSharePointNav({
+                                                                    siteId: undefined,
+                                                                    driveId: undefined,
+                                                                    folderId: undefined,
+                                                                });
+                                                            } else if (
+                                                                sharePointNav.siteId === 'browse'
+                                                            ) {
+                                                                // Go back to root (quick access + browse option)
+                                                                setSharePointNav({
+                                                                    siteId: undefined,
+                                                                    driveId: undefined,
+                                                                    folderId: undefined,
+                                                                });
+                                                            } else if (sharePointNav.siteId) {
+                                                                // Go back to browse sites
+                                                                setSharePointNav({
+                                                                    siteId: 'browse',
+                                                                    driveId: undefined,
+                                                                    folderId: undefined,
+                                                                });
+                                                            }
+                                                        }}
+                                                    >
+                                                        {sharePointNav.folderId
+                                                            ? t('← Back to drive')
+                                                            : sharePointNav.driveId &&
+                                                                sharePointNav.siteId &&
+                                                                QUICK_ACCESS_SITE_IDS.includes(
+                                                                    sharePointNav.siteId
+                                                                )
+                                                              ? t('← Back to quick access')
+                                                              : sharePointNav.driveId
+                                                                ? t('← Back to site')
+                                                                : sharePointNav.siteId === 'browse'
+                                                                  ? t('← Back to quick access')
+                                                                  : t('← Back to sites')}
+                                                    </Button>
+                                                )}
                                         </div>
 
                                         {/* File list - takes remaining height */}
@@ -379,6 +514,14 @@ export function ConnectedSourcesDialog({
                                                     isLoadingBox,
                                                     boxError,
                                                     refetchBox
+                                                )}
+                                            {source.type === 'sharepoint' &&
+                                                renderFileList(
+                                                    sharePointFiles?.files,
+                                                    'sharepoint',
+                                                    isLoadingSharePoint,
+                                                    sharePointError,
+                                                    refetchSharePoint
                                                 )}
                                         </div>
                                     </div>
