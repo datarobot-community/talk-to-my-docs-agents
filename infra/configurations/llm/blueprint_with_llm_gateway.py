@@ -96,7 +96,7 @@ verify_llm_gateway_model_availability(default_model)
 
 # LiteLLM support DataRobot as a provider, so this validates
 # everything is working and the default LLM you've chosen is available
-verify_llm(f"{default_model}")
+verify_llm(f"{default_model}", use_llm_gateway=True)
 
 playground = datarobot.Playground(
     use_case_id=use_case.id,
@@ -125,10 +125,20 @@ llm_custom_model = datarobot.CustomModel(
     source_llm_blueprint_id=llm_blueprint.id,
 )
 
-prediction_environment = datarobot.PredictionEnvironment(
-    resource_name=f"Talk to My Docs Prediction Environment [{PROJECT_NAME}]",
-    platform=dr.enums.PredictionEnvironmentPlatform.DATAROBOT_SERVERLESS,
-)
+if prediction_environment_id := os.environ.get(
+    "DATAROBOT_DEFAULT_PREDICTION_ENVIRONMENT"
+):
+    pulumi.info(f"Using existing prediction environment '{prediction_environment_id}'")
+
+    prediction_environment = datarobot.PredictionEnvironment.get(
+        id=prediction_environment_id,
+        resource_name=f"Talk to My Docs Prediction Environment [{PROJECT_NAME}] [PRE-EXISTING]",
+    )
+else:
+    prediction_environment = datarobot.PredictionEnvironment(
+        resource_name=f"Talk to My Docs Prediction Environment [{PROJECT_NAME}]",
+        platform=dr.enums.PredictionEnvironmentPlatform.DATAROBOT_SERVERLESS,
+    )
 
 # Register the custom model
 llm_registered_model = datarobot.RegisteredModel(
@@ -187,6 +197,11 @@ custom_model_runtime_parameters = [
         key=llm_application_name.upper() + "_DEFAULT_MODEL",
         type="string",
         value=default_model,
+    ),
+    datarobot.CustomModelRuntimeParameterValueArgs(
+        key="USE_DATAROBOT_LLM_GATEWAY",
+        type="string",
+        value="1",
     ),
 ]
 pulumi.export("Deployment ID " + llm_deployment.pulumi_resource_name, llm_deployment.id)

@@ -30,7 +30,7 @@ export const ConfirmDialog: React.FC<{
             <SheetPortal>
                 <SheetOverlay className="fixed inset-0 z-50 bg-black/50" />
                 <DialogPrimitive.Content
-                    className="fixed top-1/2 left-1/2 z-50 w-[540px] -translate-1/2 rounded bg-background p-6 shadow-lg"
+                    className="bg-background fixed top-1/2 left-1/2 z-50 w-[540px] -translate-1/2 rounded p-6 shadow-lg"
                     aria-describedby={undefined}
                 >
                     {title && <SheetTitle className="mb-4 text-lg font-bold">{title}</SheetTitle>}

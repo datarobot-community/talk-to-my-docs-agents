@@ -207,7 +207,7 @@ export function ConnectedSourcesDialog({
                                         source: getSourceDisplayName(source),
                                     })}
                                 </p>
-                                <p className="mt-1 body">{errorMessage}</p>
+                                <p className="body mt-1">{errorMessage}</p>
                             </div>
                         </AlertDescription>
                     </Alert>
@@ -263,7 +263,7 @@ export function ConnectedSourcesDialog({
                 {/* Search Box */}
                 <div className="shrink-0">
                     <div className="relative">
-                        <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground select-none" />
+                        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 select-none" />
                         <Input
                             placeholder={t('Search {{source}} files...', { source })}
                             value={searchQuery}
@@ -274,7 +274,7 @@ export function ConnectedSourcesDialog({
                 </div>
 
                 {/* File Count */}
-                <div className="shrink-0 border-b body-secondary py-2">
+                <div className="body-secondary shrink-0 border-b py-2">
                     {searchQuery ? (
                         <>
                             {t('Showing {{filtered}} of {{total}} items', {
@@ -305,7 +305,7 @@ export function ConnectedSourcesDialog({
                                 filteredFiles.map(file => (
                                     <div
                                         key={file.id}
-                                        className={`flex cursor-pointer items-center gap-3 border-b p-3 last:border-b-0 hover:bg-secondary ${
+                                        className={`hover:bg-secondary flex cursor-pointer items-center gap-3 border-b p-3 last:border-b-0 ${
                                             isUploading ? 'opacity-50' : ''
                                         }`}
                                         onClick={() =>
@@ -313,17 +313,17 @@ export function ConnectedSourcesDialog({
                                         }
                                     >
                                         {file.type === 'folder' ? (
-                                            <FolderIcon className="size-4 shrink-0 text-link" />
+                                            <FolderIcon className="text-link size-4 shrink-0" />
                                         ) : file.type === 'web_link' ? (
-                                            <ExternalLink className="size-4 shrink-0 text-success" />
+                                            <ExternalLink className="text-success size-4 shrink-0" />
                                         ) : (
-                                            <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                                            <FileIcon className="text-muted-foreground size-4 shrink-0" />
                                         )}
-                                        <span className="flex-1 truncate body">{file.name}</span>
-                                        <span className="shrink-0 caption-01">{file.type}</span>
+                                        <span className="body flex-1 truncate">{file.name}</span>
+                                        <span className="caption-01 shrink-0">{file.type}</span>
                                         {isUploading && (
                                             <div className="flex items-center gap-1">
-                                                <div className="size-3 animate-spin rounded-full border-2 border-link border-t-transparent" />
+                                                <div className="border-link size-3 animate-spin rounded-full border-2 border-t-transparent" />
                                                 <span className="caption-01 text-link">
                                                     {t('Uploading...')}
                                                 </span>
@@ -348,7 +348,7 @@ export function ConnectedSourcesDialog({
                         {t('Upload from Connected Source')}
                         {isUploading && (
                             <div className="ml-2 flex items-center gap-2">
-                                <div className="size-4 animate-spin rounded-full border-2 border-link border-t-transparent" />
+                                <div className="border-link size-4 animate-spin rounded-full border-2 border-t-transparent" />
                                 <span className="body text-link">{t('Uploading...')} </span>
                             </div>
                         )}
@@ -357,10 +357,10 @@ export function ConnectedSourcesDialog({
 
                 {!hasConnectedSources ? (
                     <div className="flex flex-col items-center justify-center space-y-4 py-8">
-                        <CloudUpload className="size-12 text-muted-foreground" />
+                        <CloudUpload className="text-muted-foreground size-12" />
                         <div className="text-center">
                             <Heading level={3}>{t('No Connected Sources')}</Heading>
-                            <p className="mt-1 body-secondary">
+                            <p className="body-secondary mt-1">
                                 {t(
                                     'Connect to Google Drive, Box, or SharePoint to upload files from your cloud storage.'
                                 )}

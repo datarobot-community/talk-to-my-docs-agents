@@ -109,7 +109,7 @@ export const KnowledgeBaseFormPage = () => {
                             {formBase.name}
                         </Heading>
                         {formBase.description && (
-                            <p className="mb-1 caption-01">{formBase.description}</p>
+                            <p className="caption-01 mb-1">{formBase.description}</p>
                         )}
                         <FileUploader
                             onFilesChange={() => {}}

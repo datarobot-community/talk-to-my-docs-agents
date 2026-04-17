@@ -269,7 +269,14 @@ class OTel:
             if self.telemetry_enabled and not self._tracer_provider:
                 self.configure_tracing()
 
-            FastAPIInstrumentor.instrument_app(app)
+            FastAPIInstrumentor.instrument_app(
+                app,
+                # - //[^/]+/$ matches the root path also excludes kube-probe which has
+                #  {full_path:path} route. (http://host:port/ with no further segments)
+                # - /health$ matches the health endpoint
+                # - /assets/.* matches static asset paths
+                excluded_urls=r"//[^/]+/$,/health$,/assets/.*",
+            )
             logging.getLogger(__name__).info(
                 "Auto-instrumentation enabled for FastAPI application"
             )

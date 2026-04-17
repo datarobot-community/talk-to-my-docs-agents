@@ -164,7 +164,7 @@ class DRFileSystem(AbstractFileSystem):  # type: ignore[misc]
         self._refresh_fs_metadata_timestamp_stored()
         if not self._fs_metadata_timestamp_stored:
             return True
-        return (
+        return bool(
             self._fs_metadata_timestamp_stored.numeric_value
             <= self._fs_metadata_timestamp
         )
@@ -174,7 +174,7 @@ class DRFileSystem(AbstractFileSystem):  # type: ignore[misc]
             return False
         if not self._fs_metadata_timestamp_stored:
             return True
-        return (
+        return bool(
             self._fs_metadata_timestamp
             > self._fs_metadata_timestamp_stored.numeric_value
         )

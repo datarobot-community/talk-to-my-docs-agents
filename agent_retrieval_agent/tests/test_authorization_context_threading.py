@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,25 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
 from custom import chat, load_model
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_agent():
-    with patch("custom.MyAgent") as mock:
-        mock_instance = MagicMock()
-        mock_instance.invoke = AsyncMock(
-            return_value=(
+    with patch("agent.myagent.MyAgent") as mock:
+
+        async def gen():
+            yield (
                 "agent result",
                 [],
                 {"completion_tokens": 1, "prompt_tokens": 2, "total_tokens": 3},
             )
-        )
+
+        mock_instance = MagicMock()
+        mock_instance.invoke = Mock(return_value=gen())
         mock.return_value = mock_instance
         yield mock, mock_instance
+
+
+@pytest.fixture
+def mock_mcp_tools_context():
+    with patch("agent.myagent.mcp_tools_context") as mock:
+        yield mock
 
 
 @pytest.fixture
@@ -51,50 +60,44 @@ def completion_params():
 
 class TestAuthorizationContextPropagation:
     def test_authorization_context_set_in_params(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
         auth_context = {"token": "test-token", "user_id": "test-user"}
 
         with patch("custom.resolve_authorization_context", return_value=auth_context):
             chat(completion_params, load_model_result)
 
-        call_kwargs = mock_class.call_args[1]
-        assert "authorization_context" in call_kwargs
-        assert call_kwargs["authorization_context"] == auth_context
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        assert mcp_config.authorization_context == auth_context
 
     def test_authorization_context_passed_to_agent(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
         auth_context = {"token": "test-token", "user_id": "test-user"}
 
         with patch("custom.resolve_authorization_context", return_value=auth_context):
             chat(completion_params, load_model_result)
 
-        mock_class.assert_called_once()
-        call_kwargs = mock_class.call_args[1]
-        assert call_kwargs.get("authorization_context") == auth_context
+        mock_mcp_tools_context.assert_called_once()
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        assert mcp_config.authorization_context == auth_context
 
     def test_empty_authorization_context_handled(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
-
         with patch("custom.resolve_authorization_context", return_value={}):
             response = chat(completion_params, load_model_result)
 
         assert response is not None
-        mock_instance.invoke.assert_called_once()
-        call_kwargs = mock_class.call_args[1]
-        assert call_kwargs.get("authorization_context") == {}
+        mock_mcp_tools_context.assert_called_once()
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        assert mcp_config.authorization_context == {}
 
 
 class TestHeaderForwarding:
     def test_forwarded_headers_whitelisted(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
         headers = {
             "x-datarobot-api-key": "secret-key",
             "x-datarobot-api-token": "secret-token",
@@ -104,20 +107,18 @@ class TestHeaderForwarding:
         with patch("custom.resolve_authorization_context", return_value={}):
             chat(completion_params, load_model_result, headers=headers)
 
-        call_kwargs = mock_class.call_args[1]
-        assert "forwarded_headers" in call_kwargs
-        forwarded = call_kwargs["forwarded_headers"]
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        forwarded = mcp_config.forwarded_headers
         assert forwarded["x-datarobot-api-key"] == "secret-key"
         assert forwarded["x-datarobot-api-token"] == "secret-token"
         assert "x-custom-header" not in forwarded
 
     def test_forwarded_headers_case_insensitive(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
         header1 = "X-DataRobot-API-Key"
         header2 = "X-DATAROBOT-API-TOKEN"
 
-        mock_class, mock_instance = mock_agent
         headers = {
             header1: "secret-key",
             header2: "secret-token",
@@ -126,40 +127,33 @@ class TestHeaderForwarding:
         with patch("custom.resolve_authorization_context", return_value={}):
             chat(completion_params, load_model_result, headers=headers)
 
-        call_kwargs = mock_class.call_args[1]
-        forwarded = call_kwargs["forwarded_headers"]
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        forwarded = mcp_config.forwarded_headers
         assert len(forwarded) == 2
         assert header1 in forwarded
         assert header2 in forwarded
 
     def test_forwarded_headers_empty_when_no_headers(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
-
         with patch("custom.resolve_authorization_context", return_value={}):
             chat(completion_params, load_model_result)
 
-        call_kwargs = mock_class.call_args[1]
-        assert "forwarded_headers" in call_kwargs
-        assert call_kwargs["forwarded_headers"] == {}
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        assert mcp_config.forwarded_headers == {}
 
     def test_forwarded_headers_empty_when_none(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
-
         with patch("custom.resolve_authorization_context", return_value={}):
             chat(completion_params, load_model_result, headers=None)
 
-        call_kwargs = mock_class.call_args[1]
-        assert "forwarded_headers" in call_kwargs
-        assert call_kwargs["forwarded_headers"] == {}
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        assert mcp_config.forwarded_headers == {}
 
     def test_only_whitelisted_headers_forwarded(
-        self, mock_agent, load_model_result, completion_params
+        self, mock_mcp_tools_context, load_model_result, completion_params
     ):
-        mock_class, mock_instance = mock_agent
         headers = {
             "Authorization": "Bearer token",
             "Content-Type": "application/json",
@@ -169,6 +163,6 @@ class TestHeaderForwarding:
         with patch("custom.resolve_authorization_context", return_value={}):
             chat(completion_params, load_model_result, headers=headers)
 
-        call_kwargs = mock_class.call_args[1]
-        forwarded = call_kwargs["forwarded_headers"]
+        mcp_config = mock_mcp_tools_context.call_args[0][0]
+        forwarded = mcp_config.forwarded_headers
         assert len(forwarded) == 0

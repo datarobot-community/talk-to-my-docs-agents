@@ -58,7 +58,7 @@ The `cli` command provides a convenient interface for testing your agent.
 
 ```bash
 # Root directory
-task agent:cli
+task agent_retrieval_agent:cli
 
 # Agent directory
 task cli

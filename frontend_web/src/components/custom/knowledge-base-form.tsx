@@ -52,7 +52,7 @@ export function KnowledgeBaseForm({
         <form onSubmit={handleSave} className="flex flex-col gap-4">
             <Label className="mt-4 block">
                 <span className="body">{t('What are you working on?')}</span>
-                <span className="ml-1 caption-01">{t('(Required)')}</span>
+                <span className="caption-01 ml-1">{t('(Required)')}</span>
             </Label>
             <div>
                 <Input
@@ -65,14 +65,14 @@ export function KnowledgeBaseForm({
                     placeholder={t('Will be used as Knowledge Base name')}
                     className="w-full"
                 />
-                <div className="mt-1 caption-01 text-right">
+                <div className="caption-01 mt-1 text-right">
                     ({name.length}/{MAX_NAME_CHARS} {t('characters')})
                 </div>
             </div>
 
             <Label className="mt-4 block">
                 <span className="body">{t('What are you trying to achieve?')}</span>
-                <span className="ml-1 caption-01">{t('(Required)')}</span>
+                <span className="caption-01 ml-1">{t('(Required)')}</span>
                 <p className="body-secondary">
                     {t('A detailed description helps generate more accurate results.')}
                 </p>
@@ -88,7 +88,7 @@ export function KnowledgeBaseForm({
                     rows={3}
                     maxLength={MAX_DESCRIPTION_CHARS}
                 />
-                <div className="mt-1 caption-01 text-right">
+                <div className="caption-01 mt-1 text-right">
                     ({description.length}/{MAX_DESCRIPTION_CHARS} {t('characters')})
                 </div>
             </div>

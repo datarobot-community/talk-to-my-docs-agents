@@ -61,7 +61,7 @@ export function AppHeader() {
                             className="p-2"
                         >
                             <div className="relative">
-                                <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground select-none" />
+                                <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 select-none" />
                                 <Input
                                     placeholder={t('Search...')}
                                     value={search}

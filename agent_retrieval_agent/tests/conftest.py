@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,28 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
-import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-
-
-@pytest.fixture
-def tests_path():
-    path = os.path.split(os.path.abspath(__file__))[0]
-    return path
-
-
-@pytest.fixture
-def root_path(tests_path):
-    path = os.path.split(tests_path)[0]
-    return path
-
-
-@pytest.fixture(autouse=True)
-def agentic_workflow_environment(root_path):
-    sys.path.append(os.path.join(root_path, "agentic_workflow"))
+from ag_ui.core import (
+    EventType,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageChunkEvent,
+)
 
 
 @pytest.fixture
@@ -41,15 +28,35 @@ def mock_agent_response():
     """
     Fixture to return a mock agent response based on the agent template framework.
     """
-    return (
-        "agent result",
-        [],
-        {
-            "completion_tokens": 1,
-            "prompt_tokens": 2,
-            "total_tokens": 3,
-        },
-    )
+    usage = {"completion_tokens": 1, "prompt_tokens": 2, "total_tokens": 3}
+    zero = {"completion_tokens": 0, "prompt_tokens": 0, "total_tokens": 0}
+
+    async def generate_response():
+        yield (
+            RunStartedEvent(
+                type=EventType.RUN_STARTED, thread_id="test-thread", run_id="test-run"
+            ),
+            None,
+            zero,
+        )
+        yield (
+            TextMessageChunkEvent(
+                type=EventType.TEXT_MESSAGE_CHUNK,
+                message_id="test-msg",
+                delta="agent result",
+            ),
+            None,
+            usage,
+        )
+        yield (
+            RunFinishedEvent(
+                type=EventType.RUN_FINISHED, thread_id="test-thread", run_id="test-run"
+            ),
+            [],
+            usage,
+        )
+
+    return generate_response()
 
 
 @pytest.fixture()

@@ -1,16 +1,48 @@
+/// <reference types="vitest/globals" />
 import '@testing-library/jest-dom';
-import { server } from './__mocks__/node.js';
+import type { SetupServerApi } from 'msw/node';
 
-beforeAll(() => {
+// Provide a minimal localStorage API before importing modules that rely on it.
+if (!globalThis.localStorage || typeof globalThis.localStorage.getItem !== 'function') {
+    const store: Record<string, string> = {};
+    Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        writable: true,
+        value: {
+            getItem: (key: string) => (key in store ? store[key] : null),
+            setItem: (key: string, value: string) => {
+                store[key] = String(value);
+            },
+            removeItem: (key: string) => {
+                delete store[key];
+            },
+            clear: () => {
+                for (const key of Object.keys(store)) {
+                    delete store[key];
+                }
+            },
+            key: (index: number) => Object.keys(store)[index] ?? null,
+            get length() {
+                return Object.keys(store).length;
+            },
+        } as Storage,
+    });
+}
+
+let server: SetupServerApi | undefined;
+
+beforeAll(async () => {
+    const node = await import('./__mocks__/node.js');
+    server = node.server;
     server.listen();
 });
 
 afterEach(() => {
-    server.resetHandlers();
+    server?.resetHandlers();
 });
 
 afterAll(() => {
-    server.close();
+    server?.close();
 });
 
 Object.defineProperty(window, 'matchMedia', {

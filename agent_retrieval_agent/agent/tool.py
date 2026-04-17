@@ -18,16 +18,20 @@ https://github.com/crewAIInc/crewAI-tools?tab=readme-ov-file
 for several high quality tools ready to use!
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Any, List, Optional, Type
 
 from crewai.tools import BaseTool
+from opentelemetry import trace
 from pydantic import BaseModel, Field
 
-from core.document_loader import document_loader
+from agent.core.document_loader import document_loader
 
 sample_documents_path = Path(__file__).parent / "sample_documents"
+
+_TOOL_RESULT_MAX_CHARS = 500
 
 
 class FileListTool(BaseTool):
@@ -49,6 +53,9 @@ class FileListTool(BaseTool):
                 "No files found in the folder. Please verify that you have access to datasets "
                 "and that your credentials are correct."
             )
+        span = trace.get_current_span()
+        span.set_attribute("gen_ai.tool.call.arguments", "{}")
+        span.set_attribute("gen_ai.tool.call.result", json.dumps(files))
         return files
 
 
@@ -78,8 +85,16 @@ class DocumentReadTool(BaseTool):
         if not file_path:
             raise ValueError("file_path is required but was not provided")
 
+        span = trace.get_current_span()
+        span.set_attribute(
+            "gen_ai.tool.call.arguments", json.dumps({"file_path": file_path})
+        )
         try:
             pages: dict[int, str] = document_loader.convert_document_to_text(file_path)
+            result = json.dumps(pages)
+            span.set_attribute(
+                "gen_ai.tool.call.result", result[:_TOOL_RESULT_MAX_CHARS]
+            )
             return pages
         except Exception as e:
             raise ValueError(
@@ -121,14 +136,22 @@ class KnowledgeBaseContentTool(BaseTool):
 
     def _run(self, file_uuids: list[str]) -> dict[str, dict[str, str]]:
         """Retrieve the full content of knowledge base files by their UUIDs."""
+        span = trace.get_current_span()
+        span.set_attribute(
+            "gen_ai.tool.call.arguments", json.dumps({"file_uuids": file_uuids})
+        )
 
         if not file_uuids:
-            return {
+            result = {
                 "error": {
                     "1": "No file UUIDs provided. Please provide a list of file UUIDs to retrieve content. "
                     "You should get these from the Knowledge Base File Searcher's output."
                 }
             }
+            span.set_attribute(
+                "gen_ai.tool.call.result", json.dumps(result)[:_TOOL_RESULT_MAX_CHARS]
+            )
+            return result
 
         content_subset: dict[str, dict[str, str]] = {}
         for file_uuid in file_uuids:
@@ -138,6 +161,10 @@ class KnowledgeBaseContentTool(BaseTool):
                 content_subset[file_uuid] = {
                     "1": f"Content not found for file UUID: {file_uuid}"
                 }
+        span.set_attribute(
+            "gen_ai.tool.call.result",
+            json.dumps(content_subset)[:_TOOL_RESULT_MAX_CHARS],
+        )
         return content_subset
 
 
@@ -194,6 +221,11 @@ class KnowledgeBaseSearchTool(BaseTool):
         max_matches: int = 10,
     ) -> dict[str, Any]:
         """Search through knowledge base content using keywords and/or regex patterns."""
+        span = trace.get_current_span()
+        span.set_attribute(
+            "gen_ai.tool.call.arguments",
+            json.dumps({"keywords": keywords, "regex_pattern": regex_pattern}),
+        )
         # Validate inputs
         if not keywords and not regex_pattern:
             return {
@@ -313,6 +345,9 @@ class KnowledgeBaseSearchTool(BaseTool):
                 if isinstance(results["search_summary"]["files_with_matches"], int):
                     results["search_summary"]["files_with_matches"] += 1
 
+        span.set_attribute(
+            "gen_ai.tool.call.result", json.dumps(results)[:_TOOL_RESULT_MAX_CHARS]
+        )
         return results
 
     def _find_page_number(self, position: int, page_boundaries: dict[int, str]) -> str:

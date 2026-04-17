@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,18 +14,23 @@
 
 import json
 import os
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
-from agent import MyAgent
-from ragas import MultiTurnSample
 from ragas.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+
+from agent import MyAgent
 
 
 class TestMyAgentCrewAI:
     @pytest.fixture
     def agent(self):
-        return MyAgent(api_key="test_key", api_base="test_base", verbose=True)
+        return MyAgent(
+            api_key="test_key",
+            api_base="test_base",
+            verbose=True,
+            model="datarobot/azure/gpt-5-mini-2025-08-07",
+        )
 
     def test_init_with_explicit_parameters(self):
         """Test initialization with explicitly provided parameters."""
@@ -84,59 +89,6 @@ class TestMyAgentCrewAI:
         assert agent.api_key == "explicit-api-key"
         assert agent.api_base == "https://explicit-api-base.com"
 
-    def test_init_with_string_verbose_true(self):
-        """Test initialization with string 'true' for verbose parameter."""
-        # Setup
-        verbose_values = ["true", "TRUE", "True"]
-
-        for verbose in verbose_values:
-            # Execute
-            agent = MyAgent(verbose=verbose)
-
-            # Assert
-            assert agent.verbose is True
-
-    def test_init_with_string_verbose_false(self):
-        """Test initialization with string 'false' for verbose parameter."""
-        # Setup
-        verbose_values = ["false", "FALSE", "False"]
-
-        for verbose in verbose_values:
-            # Execute
-            agent = MyAgent(verbose=verbose)
-
-            # Assert
-            assert agent.verbose is False
-
-    def test_init_with_boolean_verbose(self):
-        """Test initialization with boolean values for verbose parameter."""
-        # Test with True
-        agent = MyAgent(verbose=True)
-        assert agent.verbose is True
-
-        # Test with False
-        agent = MyAgent(verbose=False)
-        assert agent.verbose is False
-
-    @patch.dict(os.environ, {}, clear=True)
-    def test_init_with_additional_kwargs(self):
-        """Test initialization with additional keyword arguments."""
-        # Setup
-        additional_kwargs = {"extra_param1": "value1", "extra_param2": 42}
-
-        # Execute
-        agent = MyAgent(**additional_kwargs)
-
-        # Assert - Additional kwargs should be accepted but not stored as attributes
-        assert agent.api_key is None  # Should fallback to env var or None
-        assert agent.api_base == "https://app.datarobot.com"  # Default value
-        assert agent.model is None
-        assert agent.verbose is True
-
-        # Verify that the extra parameters don't create attributes
-        with pytest.raises(AttributeError):
-            _ = agent.extra_param1
-
     @pytest.mark.parametrize(
         "api_base,expected_result",
         [
@@ -168,12 +120,15 @@ class TestMyAgentCrewAI:
             (None, "https://app.datarobot.com/"),
         ],
     )
-    @patch("agent.LLM")
+    @patch("agent.myagent.LLM")
     def test_llm_gateway_with_api_base(self, mock_llm, api_base, expected_result):
         """Test api_base_litellm property with various URL formats."""
         with patch.dict(os.environ, {}, clear=True):
-            agent = MyAgent(api_base=api_base)
-            _ = agent.llm(preferred_model="datarobot/azure/gpt-5-mini-2025-08-07")
+            agent = MyAgent(
+                api_base=api_base, model="datarobot/azure/gpt-5-mini-2025-08-07"
+            )
+            agent.config.llm_deployment_id = None
+            _ = agent.llm()
             mock_llm.assert_called_once_with(
                 model="datarobot/azure/gpt-5-mini-2025-08-07",
                 api_base=expected_result,
@@ -234,13 +189,13 @@ class TestMyAgentCrewAI:
             ),
         ],
     )
-    @patch("agent.LLM")
+    @patch("agent.myagent.LLM")
     def test_llm_deployment_with_api_base(self, mock_llm, api_base, expected_result):
         """Test api_base_litellm property with various URL formats."""
         with patch.dict(os.environ, {"LLM_DEPLOYMENT_ID": "test-id"}, clear=True):
             agent = MyAgent(api_base=api_base)
             agent.config.llm_default_model = "datarobot/azure/gpt-5-mini-2025-08-07"
-            _ = agent.llm(preferred_model="datarobot/azure/gpt-5-mini-2025-08-07")
+            _ = agent.llm()
             mock_llm.assert_called_once_with(
                 model="datarobot/azure/gpt-5-mini-2025-08-07",
                 api_base=expected_result,
@@ -248,9 +203,10 @@ class TestMyAgentCrewAI:
                 timeout=300,
             )
 
-    @patch("agent.LLM")
+    @patch("agent.myagent.LLM")
     def test_llm(self, mock_llm, agent):
         # Test that LLM is created with correct parameters
+        agent.config.llm_deployment_id = None
         agent.llm()
         mock_llm.assert_called_once_with(
             model="datarobot/azure/gpt-5-mini-2025-08-07",
@@ -259,11 +215,16 @@ class TestMyAgentCrewAI:
             timeout=300,
         )
 
-    @patch("agent.LLM")
+    @patch("agent.myagent.LLM")
     def test_llm_property_with_no_api_base(self, mock_llm, agent):
         # Test that LLM is created with correct parameters
         with patch.dict(os.environ, {}, clear=True):
-            agent = MyAgent(api_key="test_key", verbose=True)
+            agent = MyAgent(
+                api_key="test_key",
+                verbose=True,
+                model="datarobot/azure/gpt-5-mini-2025-08-07",
+            )
+            agent.config.llm_deployment_id = None
             agent.llm()
             mock_llm.assert_called_once_with(
                 model="datarobot/azure/gpt-5-mini-2025-08-07",
@@ -272,11 +233,115 @@ class TestMyAgentCrewAI:
                 timeout=300,
             )
 
-    @patch("datarobot_genai.crewai.agent.Crew")
-    @patch("agent.CrewAIEventListener")
-    @patch("agent.Agent")
+    @patch("agent.myagent.LLM")
+    @pytest.mark.parametrize("use_datarobot_llm_gateway", [True, False])
+    def test_llm_with_identity_token(self, mock_llm, use_datarobot_llm_gateway):
+        with patch.dict(os.environ, {"LLM_DEPLOYMENT_ID": "test-id"}, clear=True):
+            agent = MyAgent(
+                api_key="test_key",
+                verbose=True,
+                model="datarobot/azure/gpt-5-mini-2025-08-07",
+                forwarded_headers={
+                    "x-datarobot-api-key": "abc",
+                    "x-datarobot-identity-token": "xyz",
+                },
+            )
+            agent.config.use_datarobot_llm_gateway = use_datarobot_llm_gateway
+            agent.llm()
+
+            if use_datarobot_llm_gateway:
+                mock_llm.assert_called_once_with(
+                    model="datarobot/azure/gpt-5-mini-2025-08-07",
+                    api_base="https://app.datarobot.com/api/v2/deployments/test-id/chat/completions",
+                    api_key="test_key",
+                    timeout=300,
+                )
+            else:
+                mock_llm.assert_called_once_with(
+                    model="datarobot/azure/gpt-5-mini-2025-08-07",
+                    api_base="https://app.datarobot.com/api/v2/deployments/test-id/chat/completions",
+                    api_key="test_key",
+                    timeout=300,
+                    extra_headers={"X-DataRobot-Identity-Token": "xyz"},
+                )
+
+    @patch("agent.myagent.Agent")
+    def test_agent_file_searcher_property(self, mock_agent, agent):
+        # Mock the llm property
+        mock_llm = Mock()
+        with patch.object(MyAgent, "llm", return_value=mock_llm):
+            agent.agent_file_searcher
+            mock_agent.assert_called_once_with(
+                role="Files Agent",
+                goal=ANY,
+                backstory=ANY,
+                allow_delegation=False,
+                verbose=True,
+                max_iter=3,
+                llm=ANY,
+            )
+
+    @patch("agent.myagent.Agent")
+    def test_finalizer_agent_property(self, mock_agent, agent):
+        # Mock the llm property
+        mock_llm = Mock()
+        with patch.object(MyAgent, "llm", return_value=mock_llm):
+            agent.finalizer_agent
+            mock_agent.assert_called_once_with(
+                role="Finalizer Agent",
+                goal=ANY,
+                backstory=ANY,
+                max_iter=5,
+                allow_delegation=False,
+                verbose=True,
+                llm=ANY,
+            )
+
+    @patch("agent.myagent.Task")
+    def test_task_file_search_property(self, mock_task, agent):
+        # Mock the agent_file_searcher property
+        mock_file_searcher = Mock()
+        with patch.object(
+            MyAgent, "agent_file_searcher", return_value=mock_file_searcher
+        ):
+            agent.task_file_search
+            mock_task.assert_called_once_with(
+                name=ANY,
+                description=ANY,
+                expected_output=ANY,
+                output_pydantic=ANY,
+                agent=ANY,
+                tools=ANY,
+            )
+
+    @patch("agent.myagent.Task")
+    def test_task_write_property(self, mock_task, agent):
+        # Mock the agent_file_searcher property
+        mock_file_searcher = Mock()
+        with patch.object(
+            MyAgent, "agent_file_searcher", return_value=mock_file_searcher
+        ):
+            agent.task_write
+            mock_task.assert_called_once_with(
+                name=ANY,
+                description=ANY,
+                expected_output=ANY,
+                agent=ANY,
+                tools=ANY,
+            )
+
+    @patch("agent.myagent.Crew")
+    @patch("agent.myagent.CrewAIRagasEventListener")
+    @patch("agent.myagent.Task")
+    @patch("agent.myagent.Agent")
     def test_chat(
-        self, mock_agent, mock_event_listener, mock_crew, agent, load_model_result
+        self,
+        mock_agent,
+        mock_task,
+        mock_event_listener,
+        mock_crew,
+        agent,
+        load_model_result,
     ):
         # This test case covers testing that the agent invoke runs with the llm interactions mocked
         from custom import chat
@@ -291,7 +356,7 @@ class TestMyAgentCrewAI:
                 total_tokens=3,
             ),
         )
-        mock_crew.return_value = Mock(kickoff=MagicMock(return_value=crew_output))
+        mock_crew.return_value = Mock(kickoff_async=AsyncMock(return_value=crew_output))
 
         events = [
             HumanMessage(content="Hi"),
@@ -305,8 +370,6 @@ class TestMyAgentCrewAI:
             AIMessage(content="How are you today?"),
         ]
         mock_event_listener.return_value = Mock(messages=events)
-        # Ensure the actual agent instance uses our mocked event listener
-        agent.event_listener = mock_event_listener.return_value
 
         # Setup mocks
         completion_create_params = {
@@ -315,18 +378,7 @@ class TestMyAgentCrewAI:
             "environment_var": True,
         }
 
-        with (
-            patch.object(
-                MyAgent, "build_crewai_workflow", return_value=mock_crew.return_value
-            ),
-            patch(
-                "datarobot_genai.crewai.agent.create_pipeline_interactions_from_messages",
-                return_value=MultiTurnSample(user_input=events),
-            ),
-        ):
-            response = chat(
-                completion_create_params, load_model_result=load_model_result
-            )
+        response = chat(completion_create_params, load_model_result=load_model_result)
 
         # Assert results - check the pipeline_interactions - other sections of the
         # results are already being checked in test_custom_model.py::test_chat

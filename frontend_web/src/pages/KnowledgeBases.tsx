@@ -80,7 +80,7 @@ export const KnowledgeBases = () => {
         return (
             <div className="flex max-h-screen items-center justify-center p-6">
                 <div className="text-center">
-                    <p className="mb-4 text-destructive">{t('Failed to load knowledge bases')}</p>
+                    <p className="text-destructive mb-4">{t('Failed to load knowledge bases')}</p>
                     <Button onClick={() => window.location.reload()}>{t('Retry')}</Button>
                 </div>
             </div>
@@ -102,7 +102,7 @@ export const KnowledgeBases = () => {
                             'Create a knowledge base to group documents by topic, team, or use case.'
                         )}
                     </p>
-                    <p className="mb-6 body-secondary">
+                    <p className="body-secondary mb-6">
                         {t(
                             'Once uploaded, you can search, summarize, and chat with them using AI.'
                         )}
@@ -221,7 +221,7 @@ export const KnowledgeBases = () => {
                             </CardAction>
                         </CardHeader>
 
-                        <CardContent className="space-y-2 mn-label">
+                        <CardContent className="mn-label space-y-2">
                             <div className="flex items-center gap-2">
                                 <FileText className="size-4" />
                                 <span data-testid="knowledge-base-file-count">

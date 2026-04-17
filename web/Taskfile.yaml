@@ -56,6 +56,8 @@ tasks:
       AGENT_DEPLOYMENT_URL: http://localhost:8842
       TEST_USER_EMAIL: "developer@example.com"
       TEST_USER_API_KEY: "{{ .DATAROBOT_API_TOKEN }}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "{{ .OTEL_EXPORTER_OTLP_ENDPOINT | default \"http://localhost:4318\" }}"
+      OTEL_SERVICE_NAME: talk-to-my-docs-web-local
     deps:
       - auth-check
       - build-frontend

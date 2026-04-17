@@ -18,7 +18,7 @@ export function ChatUserMessage({
     message: IChatMessage;
 }) {
     return (
-        <div className={cn('flex w-fit items-center gap-2 rounded-md bg-card p-3', classNames)}>
+        <div className={cn('bg-card flex w-fit items-center gap-2 rounded-md p-3', classNames)}>
             <UserAvatar />
             <p className="">{message.content}</p>
         </div>

@@ -2,3 +2,4 @@
 .env
 .data
 htmlcov
+/static/

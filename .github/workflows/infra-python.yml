@@ -3,7 +3,13 @@ name: Python Infra Checks
 
 on:
   push:
+    branches: ["main"]
+    paths:
+      - 'infra/**.py'
   pull_request:
+    branches: ["main"]
+    paths:
+      - 'infra/**.py'
   workflow_dispatch:
 
 jobs:

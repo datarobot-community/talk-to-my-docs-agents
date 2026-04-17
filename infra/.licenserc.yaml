@@ -16,6 +16,7 @@ header:
   license:
     spdx-id: N/A
     copyright-owner: DataRobot, Inc.
+    pattern: "Copyright [0-9]{4} DataRobot, Inc."
     content: |-
       Copyright {{ copyright_year }} DataRobot, Inc.
 

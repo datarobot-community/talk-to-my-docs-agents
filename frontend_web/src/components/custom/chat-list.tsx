@@ -5,7 +5,7 @@ import { SidebarMenuButton, SidebarMenu, SidebarMenuItem } from '@/components/ui
 import { Spinner } from '@/components/ui/spinner.tsx';
 import { getChatNameOrDefaultWithTimestamp } from '@/lib/utils.ts';
 import { ChatActionMenu } from '@/components/custom/chat-action-menu.tsx';
-import { TruncatedWithTooltip } from '@/components/custom/truncated-with-tooltip.tsx';
+import { TruncateWithTooltip } from '@/components/ui/truncate-with-tooltip';
 import { useTranslation } from '@/lib/i18n';
 
 export const ChatList: React.FC = () => {
@@ -20,7 +20,7 @@ export const ChatList: React.FC = () => {
     const location = useLocation();
     if (isLoading) {
         return (
-            <div className="flex flex-row items-center gap-1 body pt-2">
+            <div className="body flex flex-row items-center gap-1 pt-2">
                 <Spinner className="size-6" /> {t('Loading chats...')}
             </div>
         );
@@ -39,13 +39,12 @@ export const ChatList: React.FC = () => {
                             <Link
                                 to={`/chat/${chat.uuid}`}
                                 aria-label={getChatNameOrDefaultWithTimestamp(chat)}
-                                className="ml-2 grow"
+                                className="ml-2 max-w-[180px] grow"
                                 data-testid={`chat-link-${chat.uuid}`}
                             >
-                                <TruncatedWithTooltip
-                                    text={getChatNameOrDefaultWithTimestamp(chat)}
-                                    triggerClasses="max-w-[180px]"
-                                />
+                                <TruncateWithTooltip>
+                                    <span>{getChatNameOrDefaultWithTimestamp(chat)}</span>
+                                </TruncateWithTooltip>
                             </Link>
                             <ChatActionMenu chat={chat} />
                         </div>

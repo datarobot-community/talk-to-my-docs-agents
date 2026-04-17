@@ -26,14 +26,11 @@ import logging
 import datarobot
 import pulumi
 import pulumi_datarobot
-from litellm import completion
-
-
-from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 from datarobot_pulumi_utils.common.feature_flags import (
     eval_feature_flag_statuses,
     FeatureFlagSet,
 )
+from litellm import completion
 
 INFRA_DIR = Path(__file__).parent
 
@@ -126,7 +123,7 @@ class ProviderCredential:
                 )
             elif param.type == "credential":
                 credential = pulumi_datarobot.ApiTokenCredential(
-                    resource_name=f"{pulumi.get_project()} {param.key} Credential [{PROJECT_NAME}]",
+                    resource_name=f"{pulumi.get_project()} {param.key} [llm]",
                     api_token=os.environ.get(param.key),
                 )
                 runtime_values.append(
@@ -136,7 +133,7 @@ class ProviderCredential:
                 )
             elif param.type == "google_credential":
                 credential = pulumi_datarobot.GoogleCloudCredential(
-                    resource_name=f"{pulumi.get_project()} {param.key} Credential [{PROJECT_NAME}]",
+                    resource_name=f"{pulumi.get_project()} {param.key} [llm]",
                     gcp_key=os.environ.get(param.key),
                 )
                 runtime_values.append(
@@ -148,7 +145,7 @@ class ProviderCredential:
                 )
             elif param.type == "aws_credential":
                 credential = pulumi_datarobot.AwsCredential(
-                    resource_name=f"{pulumi.get_project()} {param.key} Credential [{PROJECT_NAME}]",
+                    resource_name=f"{pulumi.get_project()} {param.key} [llm]",
                     aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
                     aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
                     aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
@@ -308,7 +305,11 @@ def verify_llm_gateway_model_availability(model_id: str) -> None:
         )
 
 
-def verify_llm(model_id: str | None = None, deployment_id: str | None = None) -> None:
+def verify_llm(
+    model_id: str | None = None,
+    deployment_id: str | None = None,
+    use_llm_gateway: bool = False,
+) -> None:
     """
     Verify that the specified LLM is valid, available, and you can say hello
     """
@@ -327,6 +328,16 @@ def verify_llm(model_id: str | None = None, deployment_id: str | None = None) ->
 
     if model_id is None:
         raise ValueError("model_id must be provided to verify_llm")
+
+    use_llm_gateway_enabled = use_llm_gateway or os.environ.get(
+        "USE_DATAROBOT_LLM_GATEWAY", ""
+    ).lower() in {"1", "true", "yes"}
+    if use_llm_gateway_enabled and not model_id.startswith("datarobot/"):
+        err_message = f"""Default model must be prefixed with 'datarobot/' provider when using LLM gateway.
+        Edit the 'LLM_DEFAULT_MODEL' environment variable to include the prefix and run again.
+        Example value: 'LLM_DEFAULT_MODEL=datarobot/{model_id}'
+        """
+        raise ValueError(err_message)
 
     # Map legacy to LiteLLM
     if "-" in model_id:

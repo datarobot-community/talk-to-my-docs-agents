@@ -1,11 +1,15 @@
 root:
-  - env: AGENT_RETRIEVAL_AGENT_ENDPOINT
+  - env: AGENT_RETRIEVAL_AGENT_PORT
     type: string
-    default: "http://localhost:8842"
-    optional: true
-    help: "Enter the local endpoint to access the agent. Should have a unique port."
+    default: "8842"
+    help: "Enter the local port to access the agent. Should be a unique value."
   - env: DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT
     type: string
     default: "[DataRobot] Python 3.11 GenAI Agents"
     optional: true
     help: "Enter the default execution environment for the agent's custom model."
+  - env: DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID
+    type: string
+    default: "69b92f2cb83bd6076dfbfbb4"
+    optional: true
+    help: "Enter the default execution environment version ID for the agent's custom model."

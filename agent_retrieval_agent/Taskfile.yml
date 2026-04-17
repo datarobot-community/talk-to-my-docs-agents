@@ -2,6 +2,8 @@
 # https://taskfile.dev
 version: '3'
 vars:
+  LOCAL_NAT_LOG_LEVEL:
+    sh: echo "${LOCAL_NAT_LOG_LEVEL:-info}"
   # Cross-platform environment cleaning - uses 'env -u' on Unix systems, falls back to empty string on Windows
   UV_CMD:
     sh: |
@@ -13,20 +15,31 @@ vars:
       else
         echo "uv"
       fi
+  AGENT_PORT:
+    sh: |
+      if [ -n "$AGENT_RETRIEVAL_AGENT_PORT" ]; then
+        echo "${AGENT_RETRIEVAL_AGENT_PORT}"
+      else
+        echo "8842"
+      fi
 tasks:
   install:
     desc: 🛠️ Install agent uv dependencies
     silent: true
     cmds:
       - echo "Updating local dependencies for agent_retrieval_agent"
-      - "{{.UV_CMD}} sync --extra dev"
+      - '{{.UV_CMD}} sync --extra dev'
       - if [ -f pyproject.toml ] && [ -d docker_context ]; then cp pyproject.toml docker_context/pyproject.toml; fi
       - if [ -f uv.lock ] && [ -d docker_context ]; then cp uv.lock docker_context/uv.lock; fi
-    aliases:
-      - req
+    aliases: [req]
+  update:
+    # Hidden to avoid showing in task list, run `task --list-all` to see it
+    # desc: 🛠️ Update local dependencies (refresh uv locks)
+    cmds: [echo "Updating local dependencies for agent_retrieval_agent", '{{.UV_CMD}} sync --extra dev -U']
+    silent: true
   auth-check:
     silent: true
-    desc: "🔐 Check authentication prerequisites"
+    desc: 🔐 Check authentication prerequisites
     cmds:
       - |
         if command -v dr &> /dev/null && dr auth help 2>&1 | grep -q "check"; then
@@ -39,36 +52,71 @@ tasks:
     desc: 🛠️ Add provided packages as a new dependency to an agent
     cmds:
       - echo "Adding new dependency for agent_retrieval_agent into 'extras' dependency group"
-      - "{{.UV_CMD}} add --no-upgrade --group extras {{.CLI_ARGS}}"
+      - '{{.UV_CMD}} add --no-upgrade --group extras {{.CLI_ARGS}}'
+    silent: true
+  lint:
+    desc: 🧹 Run linters
+    cmds:
+      - task: req
+      - echo "Linting the codebase"
+      - '{{.UV_CMD}} run ruff check . --fix'
+      - '{{.UV_CMD}} run ruff format .'
+      - '{{.UV_CMD}} run mypy --pretty .'
+      - "{{.UV_CMD}} run yamlfix . -e '.venv/**/*.yaml' -e '.venv/**/*.yml' -e 'build/**/*.yaml' -e 'build/**/*.yml'"
+    silent: true
+  lint-check:
+    desc: 🧹 Check whether the codebase is linted
+    cmds:
+      - task: req
+      - echo "Checking linting"
+      - '{{.UV_CMD}} run ruff format --check --diff .'
+      - '{{.UV_CMD}} run ruff check --diff .'
+      - echo "Checking type hints"
+      - '{{.UV_CMD}} run mypy --pretty .'
+    silent: true
+  test:
+    desc: 🧪 Run tests
+    cmds: [echo "Running pytest on tests", '{{.UV_CMD}} run pytest -vv ./tests/']
+    silent: true
+  test-coverage:
+    # Hidden to avoid showing in task list, run `task --list-all` to see it
+    # desc: 🧪 Run tests with coverage
+    cmds:
+      - echo "Running pytest on tests"
+      - '{{.UV_CMD}} run pytest -vv --cov --cov-report=html --cov-report=term --cov-report xml:.coverage.xml ./tests/'
     silent: true
   cli:
     desc: 🖥️ Run the CLI with provided arguments
     vars:
-      START_DEV: "{{.START_DEV}}"
-    deps:
-      - auth-check
+      START_DEV: '{{.START_DEV}}'
+    deps: [auth-check]
     cmds:
       - echo "Running CLI {{.CLI_ARGS}}"
       - |
         if [ "{{.START_DEV}}" -eq "1" ]; then
           # Kill any existing dev server processes
-          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
+          if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+            pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || true
+          else
+            pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
+          fi
 
           # Start dev server in background
           echo "🚀 Starting dev server in background..."
-          {{.UV_CMD}} run python dev.py &
+          if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+            {{.UV_CMD}} run nat --log-level {{.LOCAL_NAT_LOG_LEVEL}} start dragent_fastapi --config_file agent/workflow.yaml --reload true --port {{.AGENT_PORT}} &
+          else
+            {{.UV_CMD}} run python dev.py &
+          fi
           DEV_SERVER_PID=$!
           echo "Dev server started with PID: $DEV_SERVER_PID"
 
           # Wait for server to be ready
           echo "⏳ Waiting for dev server to be ready..."
-          _AGENT_RETRIEVAL_AGENT_ENDPOINT="http://localhost:8842"
-          if [ -n "$AGENT_RETRIEVAL_AGENT_ENDPOINT" ]; then
-            _AGENT_RETRIEVAL_AGENT_ENDPOINT="$AGENT_RETRIEVAL_AGENT_ENDPOINT"
-          fi
+          _AGENT_ENDPOINT="http://localhost:{{.AGENT_PORT}}"
           i=0
           while [ $i -lt 30 ]; do
-            if curl --silent --fail --max-time 2 "$_AGENT_RETRIEVAL_AGENT_ENDPOINT/" >/dev/null 2>&1; then
+            if curl --silent --fail --max-time 2 "$_AGENT_ENDPOINT/" >/dev/null 2>&1; then
               echo "✅ Dev server is ready!"
               break
             fi
@@ -76,7 +124,11 @@ tasks:
             i=$((i + 1))
             if [ $i -eq 30 ]; then
               echo "❌ Dev server failed to start within 30 seconds"
-              pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
+              if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+                pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || true
+              else
+                pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
+              fi
               exit 1
             fi
           done
@@ -101,35 +153,44 @@ tasks:
         # Clean up dev server processes if we started them
         if [ "{{.START_DEV}}" -eq "1" ]; then
           echo "🛑 Stopping dev server..."
-          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
+          if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+            pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || true
+          else
+            pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
+          fi
           echo "✅ Dev server stopped"
         fi
-
         exit $CLI_EXIT_CODE
     silent: true
   dev:
     desc: 🔨 Run the development server
-    deps:
-      - auth-check
+    deps: [auth-check]
+    env:
+      OTEL_EXPORTER_OTLP_ENDPOINT: '{{ .OTEL_EXPORTER_OTLP_ENDPOINT | default "http://localhost:4318" }}'
+      OTEL_SERVICE_NAME: talk-to-my-docs-agent-local
     cmds:
-      - "{{.UV_CMD}} run python dev.py --autoreload"
+      - |
+        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+          {{.UV_CMD}} run nat --log-level {{.LOCAL_NAT_LOG_LEVEL}} start dragent_fastapi --config_file agent/workflow.yaml --reload true --port {{.AGENT_PORT}}
+        else
+          {{.UV_CMD}} run python dev.py --autoreload
+        fi
+    silent: true
   dev-stop:
     desc: 🛑 Stop the development server
     cmds:
-      - echo "Stopping development server"
-      - pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || echo "No development server process found"
-  chainlit:
-    desc: "🛝 Run the ChainLit playground"
-    cmds:
-      - echo "🛝 Starting ChainLit playground"
-      - "{{.UV_CMD}} sync --all-extras"
-      - "{{.UV_CMD}} run chainlit run --host 0.0.0.0 --port 8083 -w lit.py"
+      - |
+        echo "Stopping development server"
+        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+          pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || echo "No development server process found"
+        else
+          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || echo "No development server process found"
+        fi
   create-docker-context:
     desc: 🐳 Create the template for a local docker_context image
     vars:
-      BRANCH: "{{.BRANCH}}"
-    deps:
-      - install
+      BRANCH: '{{.BRANCH}}'
+    deps: [install]
     silent: true
     cmds:
       - |
@@ -169,8 +230,7 @@ tasks:
       - echo "Removed docker_context from agent."
   build-docker-image:
     desc: 🐳 [agent_retrieval_agent] Build the Docker image
-    deps:
-      - create-docker-context
+    deps: [create-docker-context]
     cmds:
       - echo "Building Docker image"
       - cp pyproject.toml docker_context/pyproject.toml
@@ -179,60 +239,16 @@ tasks:
         .
   build-docker-context:
     desc: 🐳 [agent_retrieval_agent] Build the Docker image
-    deps:
-      - build-docker-image
+    deps: [build-docker-image]
     cmds:
+      - task: create-docker-context
+      - task: build-docker-image
       - echo "Saving Docker image"
       - docker save agent_retrieval_agent:latest | gzip -1 > docker_context.tar.gz
     silent: true
   train:
     desc: 🚂 [agent_retrieval_agent] Train the model
-    cmds:
-      - echo "Training the model"
-      - uv run python agentic_workflow/train.py
+    cmds: [echo "Training the model", uv run python agent/train.py]
     silent: true
-
-  # Tasks below are rarely used / always called as a subtask.
-  # We omit descriptions so they can be discovered with --list-all but don't show up in the normal --list.
-  update:
-    # Hidden to avoid showing in task list, run `task --list-all` to see it
-    # desc: 🛠️ Update local dependencies (refresh uv locks)
-    cmds:
-      - echo "Updating local dependencies for agent_retrieval_agent"
-      - "{{.UV_CMD}} sync --extra dev -U"
-    silent: true
-  lint:
-    # Hidden to avoid showing in task list, run `task --list-all` to see it
-    # desc: 🧹 Lint the codebase
-    cmds:
-      - echo "Linting the codebase"
-      - "{{.UV_CMD}} run ruff check . --fix"
-      - "{{.UV_CMD}} run ruff format ."
-      - "{{.UV_CMD}} run mypy --pretty ."
-      - "{{.UV_CMD}} run yamlfix agentic_workflow"
-    silent: true
-  lint-check:
-    # Hidden to avoid showing in task list, run `task --list-all` to see it
-    # desc: 🧹 Check whether the codebase is linted
-    cmds:
-      - task: req
-      - echo "Checking linting"
-      - "{{.UV_CMD}} run ruff format --check --diff ."
-      - "{{.UV_CMD}} run ruff check --diff ."
-      - echo "Checking type hints"
-      - "{{.UV_CMD}} run mypy --pretty ."
-    silent: true
-  test:
-    # Hidden to avoid showing in task list, run `task --list-all` to see it
-    # desc: 🧪 Run tests
-    cmds:
-      - echo "Running pytest on tests"
-      - "{{.UV_CMD}} run pytest -vv ./tests/"
-    silent: true
-  test-coverage:
-    # Hidden to avoid showing in task list, run `task --list-all` to see it
-    # desc: 🧪 Run tests with coverage
-    cmds:
-      - echo "Running pytest on tests"
-      - "{{.UV_CMD}} run pytest -vv --cov --cov-report=html --cov-report=term --cov-report xml:.coverage.xml ./tests/"
-    silent: true
+    # Tasks below are rarely used / always called as a subtask.
+    # We omit descriptions so they can be discovered with --list-all but don't show up in the normal --list.

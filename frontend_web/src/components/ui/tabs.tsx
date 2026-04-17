@@ -108,7 +108,7 @@ function TabsList({
             <div ref={listRef}>{props.children}</div>
             {isUnderline && indicatorStyle && (
                 <span
-                    className="absolute bottom-0 h-0.5 bg-accent transition-all duration-300 ease-in-out"
+                    className="bg-accent absolute bottom-0 h-0.5 transition-all duration-300 ease-in-out"
                     style={{
                         left: indicatorStyle.left,
                         width: indicatorStyle.width,
@@ -125,23 +125,13 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
             data-slot="tabs-trigger"
             className={cn(
                 // Base styles
-                `
-          inline-flex cursor-pointer items-center justify-center gap-1.5 text-sm font-medium transition-colors select-none
-          disabled:cursor-default
-        `,
+                `inline-flex cursor-pointer items-center justify-center gap-1.5 text-sm font-medium transition-colors select-none disabled:cursor-default`,
                 // Default variant styles
-                'rounded-lg px-4 py-1.5 text-secondary-foreground',
-                `
-          outline-hidden
-          focus:bg-muted focus:text-accent-foreground
-          focus-visible:border-ring focus-visible:ring-[1px] focus-visible:ring-ring
-        `,
+                'text-secondary-foreground rounded-lg px-4 py-1.5',
+                `focus:bg-muted focus:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring outline-hidden focus-visible:ring-[1px]`,
                 'hover:bg-muted hover:text-accent-foreground',
-                `
-          focus:z-2
-          data-[state=active]:border-accent data-[state=active]:bg-sidebar-accent data-[state=active]:text-foreground
-        `,
-                'data-[disabled]:pointer-events-none data-[disabled]:text-muted-foreground data-[disabled]:opacity-50',
+                `data-[state=active]:border-accent data-[state=active]:bg-sidebar-accent data-[state=active]:text-foreground focus:z-2`,
+                'data-[disabled]:text-muted-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
                 // Underline variant styles (when parent has data-variant="underline")
                 'group-data-[variant=underline]:rounded-none group-data-[variant=underline]:px-3 group-data-[variant=underline]:py-2',
                 'group-data-[variant=underline]:focus-visible:ring-offset-2',

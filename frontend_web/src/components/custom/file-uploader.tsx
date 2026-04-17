@@ -148,7 +148,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                         {currentProgress !== 100 && currentProgress !== 0 && (
                             <Progress value={currentProgress} className="mt-4 h-2" />
                         )}
-                        <ScrollArea className="mt-4 scrollbar-thin w-full border-t border-primary/10">
+                        <ScrollArea className="scrollbar-thin border-primary/10 mt-4 w-full border-t">
                             <div className="max-h-[calc(100vh-400px)] min-h-[360px]">
                                 {!files.length && !existingFiles.length && (
                                     <p className="body-secondary p-6 text-center">
@@ -163,7 +163,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                                     </p>
                                 )}
                                 {files.length > 0 && (
-                                    <div className="border-b border-secondary-foreground pb-4">
+                                    <div className="border-secondary-foreground border-b pb-4">
                                         {/* New files to upload */}
                                         {files.map((file, index) => (
                                             <div
@@ -171,13 +171,13 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                                                 className="group flex w-full items-center gap-4 pt-4 pr-4"
                                             >
                                                 <div className="flex w-8 items-center justify-center">
-                                                    <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
+                                                    <FileChartColumnIncreasing className="text-muted-foreground w-6" />
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <div className="truncate body leading-tight">
+                                                    <div className="body truncate leading-tight">
                                                         {file.name}
                                                     </div>
-                                                    <div className="truncate caption-01 leading-tight">
+                                                    <div className="caption-01 truncate leading-tight">
                                                         {t('File size: {{size}}', {
                                                             size: formatFileSize(file?.size || 0),
                                                         })}
@@ -185,7 +185,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                                                 </div>
                                                 <div className="ml-2 flex items-center">
                                                     <XIcon
-                                                        className="size-4 cursor-pointer text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                                                        className="text-muted-foreground size-4 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
                                                         onClick={event => {
                                                             event.stopPropagation();
                                                             onRemove(index);
@@ -202,16 +202,16 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
                                     return (
                                         <div
                                             key={`existing-${index}`}
-                                            className="group flex w-full items-center gap-4 border-secondary-foreground py-4 pr-1"
+                                            className="group border-secondary-foreground flex w-full items-center gap-4 py-4 pr-1"
                                         >
                                             <div className="flex w-8 items-center justify-center">
-                                                <FileChartColumnIncreasing className="w-6 text-link" />
+                                                <FileChartColumnIncreasing className="text-link w-6" />
                                             </div>
                                             <div className="w-0 flex-1">
-                                                <div className="truncate body leading-tight">
+                                                <div className="body truncate leading-tight">
                                                     {file.filename}
                                                 </div>
-                                                <div className="truncate caption-01 leading-tight">
+                                                <div className="caption-01 truncate leading-tight">
                                                     {t('Added: {{date}}{{size}}', {
                                                         date: new Date(
                                                             file.added

@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,26 +14,39 @@
 import asyncio
 import json
 import logging
-import threading
+import uuid
 from textwrap import dedent
-from typing import Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
 
-from crewai import LLM, Agent, Crew, Task
-from crewai.events import crewai_event_bus
-from crewai.events.types.task_events import TaskCompletedEvent, TaskStartedEvent
-from datarobot_genai.core.agents.base import (
-    InvokeReturn,
-    extract_user_prompt_content,
-    is_streaming,
+from ag_ui.core import (
+    EventType,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageChunkEvent,
 )
+from crewai import LLM, Agent, Crew, Process, Task
+from crewai.events import TaskCompletedEvent as CrewTaskCompletedEvent
+from crewai.events import TaskStartedEvent as CrewTaskStartedEvent
+from crewai.events import crewai_event_bus
+from crewai.tools import BaseTool
+from datarobot_genai.core.agents import InvokeReturn
+from datarobot_genai.core.agents.base import (
+    UsageMetrics,
+    default_usage_metrics,
+    extract_user_prompt_content,
+    prepare_identity_header,
+)
+from datarobot_genai.core.chat import agent_chat_completion_wrapper
+from datarobot_genai.core.mcp import MCPConfig
 from datarobot_genai.crewai.agent import CrewAIAgent
-from datarobot_genai.crewai.events import CrewAIEventListener
+from datarobot_genai.crewai.mcp import mcp_tools_context
+from datarobot_genai.crewai.ragas_events import CrewAIRagasEventListener
 from openai.types.chat import CompletionCreateParams
 
-import models
-from config import Config
-from core.document_loader import SUPPORTED_FILE_TYPES
-from tool import (
+import agent.models as models
+from agent.config import Config
+from agent.core.document_loader import SUPPORTED_FILE_TYPES
+from agent.tool import (
     DocumentReadTool,
     FileListTool,
     KnowledgeBaseContentTool,
@@ -41,6 +54,9 @@ from tool import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ragas import MultiTurnSample
 
 
 class MyAgent(CrewAIAgent):
@@ -55,9 +71,11 @@ class MyAgent(CrewAIAgent):
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         model: Optional[str] = None,
-        verbose: Optional[Union[bool, str]] = True,
+        verbose: bool = True,
         timeout: Optional[int] = 300,
-        **kwargs: Any,
+        llm: Optional[LLM] = None,
+        tools: Optional[list[BaseTool]] = None,
+        forwarded_headers: Optional[dict[str, str]] = None,
     ):
         """Initializes the MyAgent class with API key, base URL, model, and verbosity settings.
 
@@ -68,13 +86,15 @@ class MyAgent(CrewAIAgent):
                 Defaults to None, in which case it will use the DATAROBOT_ENDPOINT environment variable.
             model: Optional[str]: The LLM model to use.
                 Defaults to None.
-            verbose: Optional[Union[bool, str]]: Whether to enable verbose logging.
-                Accepts boolean or string values ("true"/"false"). Defaults to True.
+            verbose: bool: Whether to enable verbose logging. Defaults to True.
             timeout: Optional[int]: How long to wait for the agent to respond.
-                Defaults to 90 seconds.
-            **kwargs: Any: Additional keyword arguments passed to the agent.
-                Contains any parameters received in the CompletionCreateParams.
-
+                Defaults to 300 seconds.
+            llm: Optional[LLM]: Pre-configured LLM instance provided by NAT.
+                When set, llm() returns this directly instead of creating a new LLM.
+            tools: Optional[list[BaseTool]]: Tools to use for the agent.
+                Defaults to None.
+            forwarded_headers: Optional[dict[str, str]]: Headers of the original request agent can use
+                to access external services. Defaults to None.
         Returns:
             None
         """
@@ -84,12 +104,13 @@ class MyAgent(CrewAIAgent):
             model=model,
             verbose=verbose,
             timeout=timeout,
-            **kwargs,
+            forwarded_headers=forwarded_headers,
+            tools=tools,
         )
+        self._llm = llm
         self.config = Config()
         self.default_model = self.config.llm_default_model
-        self.event_listener = CrewAIEventListener()
-        self.knowledge_base_files: Dict[str, dict[str, str]] = {}
+        self.knowledge_base_files: dict[str, dict[str, str]] = {}
 
     def llm(
         self,
@@ -111,8 +132,11 @@ class MyAgent(CrewAIAgent):
         Returns:
             LLM: The model to use.
         """
+        if self._llm is not None:
+            return self._llm
+
         api_base = self.litellm_api_base(self.config.llm_deployment_id)
-        model = preferred_model or self.default_model
+        model = preferred_model or self.model or self.default_model
         if auto_model_override and not self.config.use_datarobot_llm_gateway:
             model = self.default_model
         if self.verbose:
@@ -125,8 +149,10 @@ class MyAgent(CrewAIAgent):
             "timeout": self.timeout,
         }
 
-        if not self.config.use_datarobot_llm_gateway and self._identity_header:
-            config["extra_headers"] = self._identity_header
+        if not self.config.use_datarobot_llm_gateway and self.forwarded_headers:
+            identity_header = prepare_identity_header(self.forwarded_headers)
+            if identity_header:
+                config["extra_headers"] = identity_header  # type: ignore[assignment]
 
         return LLM(**config)  # type: ignore[arg-type]
 
@@ -250,30 +276,8 @@ class MyAgent(CrewAIAgent):
             allow_delegation=False,
             max_iter=5,
             verbose=self.verbose,
-            llm=self.llm(
-                preferred_model="datarobot/azure/gpt-4o-2024-11-20",
-            ),
-        )
-
-    @property
-    def task_in_question_write(self) -> Task:
-        return Task(
-            name="Analyzing content",
-            description=dedent("""
-                1. Check if the "{question}" contains the phrase "Here is the relevant document with each page separated by three dashes:".
-                2. If it does, separate the question from the document content.
-                3. Think and understand deeply the contents of the document part of the question.
-                4. Determine the best way to summarize this information in a concise and understandable way.
-                5. Create a summary that answers the question part of "{question}".
-                6. If the phrase is not found, respond with "No embedded document found in question."
-
-                It is extremely critical that you do your best to answer this question.
-            """).strip(),
-            expected_output=(
-                "A well-written brief answer in markdown format that answers the question using the embedded document, or a clear statement if no embedded document is found. "
-                "It must not include a verbatim copy of the original document."
-            ),
-            agent=self.document_in_question_agent,
+            llm=self.llm(),
+            tools=self.tools,
         )
 
     @property
@@ -293,40 +297,8 @@ class MyAgent(CrewAIAgent):
             ),
             allow_delegation=True,
             verbose=self.verbose,
-            max_iter=5,
-            llm=self.llm(
-                preferred_model="datarobot/vertex_ai/gemini-2.5-flash",
-            ),
-        )
-
-    @property
-    def task_knowledge_base_file_search(self) -> Task:
-        return Task(
-            name="Searching knowledge base",
-            description=dedent("""
-                Analyze the knowledge base `files` provided in this JSON:
-
-                ``` {knowledge_base}```
-
-                to identify which files are most relevant for answering the question: "{question}".
-                If there is nothing in between the ``` and ``` symbols, respond with 'No knowledge base files available.'
-
-                Look at file names, metadata, the topic "{topic}", and any content previews to make your determination.
-                Select the most relevant files that would likely contain the information needed to answer the question.
-                You select them by what is assigned the 'uuid' key in the knowledge base json list of files.
-
-                DO NOT select any keys such as owner_uuid or project_uuid (these are not file UUIDs). Only the key 'uuid'.
-
-                IMPORTANT: Format your response as a clear list of UUIDs, one per line, like:
-                Selected UUIDs:
-                - [actual-uuid-from-knowledge-base]
-                - [actual-uuid-from-knowledge-base]
-
-                Only use the actual UUIDs found in the provided knowledge base data.
-            """).strip(),
-            expected_output="A clearly formatted list of the most relevant file UUIDs from the knowledge base, with each UUID on its own line, or 'No knowledge base files available.'",
-            output_pydantic=models.UUIDListOutput,
-            agent=self.knowledge_base_agent,
+            llm=self.llm(),
+            tools=self.tools,
         )
 
     @property
@@ -428,117 +400,9 @@ class MyAgent(CrewAIAgent):
         return [
             self.task_file_search,
             self.task_write,
-            self.task_in_question_write,
-            self.task_knowledge_base_file_search,
             self.task_knowledge_base_content_answer,
             self.task_finalize_response,
         ]
-
-    def build_crewai_workflow(self) -> Crew:
-        return Crew(agents=self.agents, tasks=self.tasks, verbose=self.verbose)
-
-    async def invoke(
-        self, completion_create_params: CompletionCreateParams
-    ) -> InvokeReturn:
-        """Override invoke to emit task progress events during streaming."""
-        user_prompt_content = extract_user_prompt_content(completion_create_params)
-        logger.debug("Running agent with user prompt: %s", user_prompt_content)
-
-        # Setup event listener if available
-        if hasattr(self, "event_listener") and crewai_event_bus is not None:
-            try:
-                listener = getattr(self, "event_listener")
-                setup_fn = getattr(listener, "setup_listeners", None)
-                if callable(setup_fn):
-                    setup_fn(crewai_event_bus)
-            except Exception as e:
-                logger.debug("Failed to setup event listener: %s", e)
-
-        crew = self.build_crewai_workflow()
-
-        if is_streaming(completion_create_params):
-            return self._streaming_invoke(crew, user_prompt_content)
-
-        crew_output = crew.kickoff(inputs=self.make_kickoff_inputs(user_prompt_content))
-        return self._process_crew_output(crew_output)
-
-    async def _streaming_invoke(
-        self, crew: Crew, user_prompt_content: str
-    ) -> InvokeReturn:
-        """Run crew with streaming task progress."""
-        loop = asyncio.get_running_loop()
-        event_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
-        def on_task_started(source: Any, event: TaskStartedEvent) -> None:
-            task_name = (
-                event.task.name if event.task and event.task.name else None
-            ) or "Task"
-            agent_name = (
-                event.task.agent.role if event.task and event.task.agent else None
-            ) or "Agent"
-            loop.call_soon_threadsafe(
-                event_queue.put_nowait,
-                {
-                    "type": "task_started",
-                    "task_name": task_name,
-                    "agent_name": agent_name,
-                },
-            )
-
-        def on_task_completed(source: Any, event: TaskCompletedEvent) -> None:
-            task_name = (
-                event.task.name if event.task and event.task.name else None
-            ) or "Task"
-            agent_name = (
-                event.task.agent.role if event.task and event.task.agent else None
-            ) or "Agent"
-            loop.call_soon_threadsafe(
-                event_queue.put_nowait,
-                {
-                    "type": "task_completed",
-                    "task_name": task_name,
-                    "agent_name": agent_name,
-                },
-            )
-
-        crew_result: Any = None
-        crew_error: Exception | None = None
-
-        def run_crew() -> None:
-            nonlocal crew_result, crew_error
-            try:
-                if crewai_event_bus is not None:
-                    with crewai_event_bus.scoped_handlers():
-                        crewai_event_bus.on(TaskStartedEvent)(on_task_started)
-                        crewai_event_bus.on(TaskCompletedEvent)(on_task_completed)
-                        crew_result = crew.kickoff(
-                            inputs=self.make_kickoff_inputs(user_prompt_content)
-                        )
-                else:
-                    # No event bus available, run without task progress events
-                    crew_result = crew.kickoff(
-                        inputs=self.make_kickoff_inputs(user_prompt_content)
-                    )
-            except Exception as e:
-                logger.exception("Crew execution failed: %s", e)
-                crew_error = e
-            finally:
-                loop.call_soon_threadsafe(event_queue.put_nowait, None)
-
-        thread = threading.Thread(target=run_crew, daemon=True)
-        thread.start()
-
-        # Efficiently await events without polling
-        empty_usage = {"completion_tokens": 0, "prompt_tokens": 0, "total_tokens": 0}
-        while (event := await event_queue.get()) is not None:
-            yield (json.dumps({"task_progress": event}), None, empty_usage)
-
-        await asyncio.to_thread(thread.join)
-
-        if crew_error:
-            raise crew_error
-
-        yield self._process_crew_output(crew_result)
 
     def _extract_and_store_knowledge_base_content(self, base: dict[str, Any]) -> None:
         """Extracts and stores the encoded content from knowledge base files."""
@@ -546,13 +410,223 @@ class MyAgent(CrewAIAgent):
             file_uuid = file_info["uuid"]
             if "encoded_content" in file_info:
                 if not file_info["encoded_content"]:
-                    # This shouldn't happen in prod, but if you don't have libreoffice installed,
-                    # or persistence of the KB is missing it can happen.
                     continue
                 self.knowledge_base_files[file_uuid] = file_info["encoded_content"]
-                del file_info[
-                    "encoded_content"
-                ]  # Remove encoded_content from working inputs
+                del file_info["encoded_content"]
                 file_info["encoded_content"] = self.knowledge_base_files[file_uuid].get(
                     "1", ""
                 )[:500]  # preview
+
+    def crew(self) -> Crew:
+        """Override base class crew() to customize Crew options."""
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            verbose=self.verbose,
+            process=Process.sequential,
+            stream=False,
+        )
+
+    async def invoke(self, run_agent_input: Any) -> InvokeReturn:
+        """Override to emit real-time task step events and handle non-streaming LLMs.
+
+        The base class emits step events only when the LLM streams tokens. Many
+        LLMs routed through DataRobot's LLM Gateway (Bedrock, Gemini) fall back to
+        non-streaming, producing an empty response. This override:
+
+        1. Runs the crew with stream=False for reliable text output.
+        2. Listens to TaskStartedEvent / TaskCompletedEvent (fired regardless of
+           LLM streaming) and yields StepStarted/StepFinished AG-UI events in
+           near-real-time while the crew runs in a background asyncio Task.
+        3. Emits the final text from crew_output.raw after execution completes.
+        """
+        loop = asyncio.get_running_loop()
+        step_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+        user_prompt_content = extract_user_prompt_content(run_agent_input)
+        thread_id = run_agent_input.thread_id
+        run_id = run_agent_input.run_id
+        zero: UsageMetrics = {
+            "completion_tokens": 0,
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+        }
+
+        yield (
+            RunStartedEvent(
+                type=EventType.RUN_STARTED, thread_id=thread_id, run_id=run_id
+            ),
+            None,
+            default_usage_metrics(),
+        )
+
+        with crewai_event_bus.scoped_handlers():
+            ragas_listener = CrewAIRagasEventListener()
+            ragas_listener.setup_listeners(crewai_event_bus)
+
+            @crewai_event_bus.on(CrewTaskStartedEvent)
+            def _on_task_started(_: Any, event: Any) -> None:
+                task = getattr(event, "task", None)
+                agent = getattr(task, "agent", None)
+                role = getattr(agent, "role", "") if agent else ""
+                name = getattr(task, "name", "") or ""
+                step_name = f"{role}: {name}" if role and name else role or name
+                print(
+                    f"[invoke] TaskStartedEvent fired: step_name={step_name!r}",
+                    flush=True,
+                )
+                logger.info(f"[invoke] TaskStartedEvent fired: step_name={step_name!r}")
+                loop.call_soon_threadsafe(step_queue.put_nowait, ("start", step_name))
+
+            @crewai_event_bus.on(CrewTaskCompletedEvent)
+            def _on_task_completed(_: Any, event: Any) -> None:
+                logger.info("[invoke] TaskCompletedEvent fired")
+                loop.call_soon_threadsafe(step_queue.put_nowait, ("end", ""))
+
+            crew = self.crew()
+            kickoff_inputs = self.make_kickoff_inputs(str(user_prompt_content))
+
+            print("[invoke] Starting crew as background task", flush=True)
+            logger.info("[invoke] Starting crew as background task")
+            # Run crew as a background task so we can yield step events in real time
+            crew_task: asyncio.Task[Any] = asyncio.ensure_future(
+                crew.kickoff_async(inputs=kickoff_inputs)
+            )
+
+            current_step: str | None = None
+
+            def _task_progress_chunk(
+                task_name: str, agent_name: str, status: str
+            ) -> tuple[TextMessageChunkEvent, None, UsageMetrics]:
+                """Emit a task_progress JSON chunk consumed by the web app's TaskProgressProcessor."""
+                payload = json.dumps(
+                    {
+                        "task_progress": {
+                            "type": status,
+                            "task_name": task_name,
+                            "agent_name": agent_name,
+                        }
+                    }
+                )
+                return (
+                    TextMessageChunkEvent(
+                        type=EventType.TEXT_MESSAGE_CHUNK,
+                        message_id=str(uuid.uuid4()),
+                        delta=payload,
+                    ),
+                    None,
+                    zero,
+                )
+
+            # Drain the step queue while the crew runs, yielding task_progress chunks
+            while not crew_task.done():
+                await asyncio.sleep(0.05)
+                while not step_queue.empty():
+                    action, step_name = step_queue.get_nowait()
+                    logger.info(
+                        f"[invoke] Draining step queue: action={action!r} step={step_name!r}"
+                    )
+                    if action == "start":
+                        if current_step:
+                            # Previous task completed (the TaskCompletedEvent may still be in queue)
+                            parts = current_step.split(": ", 1)
+                            yield _task_progress_chunk(
+                                task_name=parts[1] if len(parts) == 2 else current_step,
+                                agent_name=parts[0] if len(parts) == 2 else "",
+                                status="task_completed",
+                            )
+                        current_step = step_name
+                        parts = step_name.split(": ", 1)
+                        yield _task_progress_chunk(
+                            task_name=parts[1] if len(parts) == 2 else step_name,
+                            agent_name=parts[0] if len(parts) == 2 else "",
+                            status="task_started",
+                        )
+                    elif action == "end" and current_step:
+                        parts = current_step.split(": ", 1)
+                        yield _task_progress_chunk(
+                            task_name=parts[1] if len(parts) == 2 else current_step,
+                            agent_name=parts[0] if len(parts) == 2 else "",
+                            status="task_completed",
+                        )
+                        current_step = None
+
+            # Drain any events that arrived between the last sleep and task completion
+            while not step_queue.empty():
+                action, step_name = step_queue.get_nowait()
+                if action == "start":
+                    if current_step:
+                        parts = current_step.split(": ", 1)
+                        yield _task_progress_chunk(
+                            task_name=parts[1] if len(parts) == 2 else current_step,
+                            agent_name=parts[0] if len(parts) == 2 else "",
+                            status="task_completed",
+                        )
+                    current_step = step_name
+                    parts = step_name.split(": ", 1)
+                    yield _task_progress_chunk(
+                        task_name=parts[1] if len(parts) == 2 else step_name,
+                        agent_name=parts[0] if len(parts) == 2 else "",
+                        status="task_started",
+                    )
+                elif action == "end" and current_step:
+                    parts = current_step.split(": ", 1)
+                    yield _task_progress_chunk(
+                        task_name=parts[1] if len(parts) == 2 else current_step,
+                        agent_name=parts[0] if len(parts) == 2 else "",
+                        status="task_completed",
+                    )
+                    current_step = None
+
+            if current_step:
+                parts = current_step.split(": ", 1)
+                yield _task_progress_chunk(
+                    task_name=parts[1] if len(parts) == 2 else current_step,
+                    agent_name=parts[0] if len(parts) == 2 else "",
+                    status="task_completed",
+                )
+
+            crew_output = await crew_task
+            usage_metrics = self._extract_usage_metrics(crew_output)
+            pipeline_interactions = self.create_pipeline_interactions_from_messages(
+                ragas_listener.messages
+            )
+
+            response_text = str(crew_output.raw)
+            if response_text:
+                yield (
+                    TextMessageChunkEvent(
+                        type=EventType.TEXT_MESSAGE_CHUNK,
+                        message_id=str(uuid.uuid4()),
+                        delta=response_text,
+                    ),
+                    None,
+                    usage_metrics,
+                )
+
+        yield (
+            RunFinishedEvent(
+                type=EventType.RUN_FINISHED, thread_id=thread_id, run_id=run_id
+            ),
+            pipeline_interactions,
+            usage_metrics,
+        )
+
+
+async def custompy_adaptor(
+    completion_create_params: CompletionCreateParams,
+) -> InvokeReturn | tuple[str, Optional["MultiTurnSample"], UsageMetrics]:
+    forwarded_headers = completion_create_params.get("forwarded_headers", {})
+    authorization_context = completion_create_params.get("authorization_context", {})
+    mcp_config = MCPConfig(
+        forwarded_headers=forwarded_headers,
+        authorization_context=authorization_context,
+    )
+    async with mcp_tools_context(mcp_config) as mcp_tools:
+        agent = MyAgent(
+            verbose=completion_create_params.get("verbose", True),  # type: ignore[arg-type]
+            timeout=completion_create_params.get("timeout", 300),  # type: ignore[arg-type]
+            tools=mcp_tools,
+            forwarded_headers=forwarded_headers,  # type: ignore[arg-type]
+        )
+        return await agent_chat_completion_wrapper(agent, completion_create_params)

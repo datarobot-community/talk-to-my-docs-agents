@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,8 +19,7 @@ from datarobot_genai.core.telemetry_agent import instrument
 
 instrument(framework="crewai")
 # ruff: noqa: E402
-from agent import MyAgent
-from config import Config
+from agent import Config, custompy_adaptor
 
 # isort: on
 # ------------------------------------------------------------------------------
@@ -97,24 +96,17 @@ def chat(
 
     # The list of the headers to forward into the Agent and MCP Server.
     incoming_headers = kwargs.get("headers", {}) or {}
-    allowed_headers = {
-        "x-datarobot-api-token",
-        "x-datarobot-api-key",
-        "x-datarobot-identity-token",
-    }
     forwarded_headers = {
-        k: v for k, v in incoming_headers.items() if k.lower() in allowed_headers
+        k: v
+        for k, v in incoming_headers.items()
+        if k.lower().startswith("x-datarobot-")
     }
     completion_create_params["forwarded_headers"] = forwarded_headers
 
-    # Instantiate the agent, all fields from the completion_create_params are passed to the agent
-    # allowing environment variables to be passed during execution
-    agent = MyAgent(**completion_create_params)
-
-    # Invoke the agent
+    # Instantiate and invoke the agent
     result = thread_pool_executor.submit(
         event_loop.run_until_complete,
-        agent.invoke(completion_create_params=completion_create_params),
+        custompy_adaptor(completion_create_params),
     ).result()
 
     # Check if the result is a generator (streaming response)
@@ -123,7 +115,7 @@ def chat(
         return to_custom_model_streaming_response(
             thread_pool_executor,
             event_loop,
-            result,
+            result,  # type: ignore[arg-type]
             model=completion_create_params.get("model"),
         )
     else:
@@ -133,6 +125,6 @@ def chat(
         return to_custom_model_chat_response(
             response_text,
             pipeline_interactions,
-            usage_metrics,
+            usage_metrics,  # type: ignore[arg-type]
             model=completion_create_params.get("model"),
         )

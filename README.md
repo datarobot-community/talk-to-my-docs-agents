@@ -496,7 +496,7 @@ INFRA_ENABLE_LLM=blueprint_with_llm_gateway.py
 Uncomment and configure these in your `.env` file:
 
 ```sh
-TEXTGEN_DEPLOYMENT_ID=<your_deployment_id>
+LLM_DEPLOYMENT_ID=<your_deployment_id>
 INFRA_ENABLE_LLM=deployed_llm.py
 LLM_DEFAULT_MODEL=<your llm_default_model>
 ```
@@ -683,5 +683,6 @@ Additionally, the Pulumi output variables are used to populate those providers f
 - [Vite Documentation](https://vitejs.dev/)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [DR CLI](https://github.com/datarobot-oss/cli)
+- [Local tracing setup](LOCAL_TRACING.md)
 
 For more details, see the README in each subproject.

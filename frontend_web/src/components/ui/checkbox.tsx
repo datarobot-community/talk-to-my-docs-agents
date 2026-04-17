@@ -19,13 +19,13 @@ const Checkbox = React.forwardRef<
                 // Layout & sizing
                 'peer group size-4 shrink-0 rounded-sm',
                 // Border & ring
-                'border border-primary ring-offset-background',
+                'border-primary ring-offset-background border',
                 // Cursor & interaction
                 'hover:not-disabled:border-transparent',
                 'hover:not-disabled:data-[state=unchecked]:border-[color-mix(in_srgb,var(--accent)_80%,white)]',
                 'disabled:cursor-not-allowed',
                 // Focus styles
-                'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none',
+                'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
                 // Transitions
                 'transition-all duration-200 ease-in',
                 // Checked state

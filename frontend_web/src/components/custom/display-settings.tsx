@@ -40,7 +40,7 @@ export const DisplaySettings = () => {
 
     return (
         <div className="flex flex-0 flex-col gap-4">
-            <div className="border-b border-border py-2">
+            <div className="border-border border-b py-2">
                 <Heading level={4}>{t('Display')}</Heading>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-1 lg:grid-cols-3">

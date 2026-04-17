@@ -1,6 +1,5 @@
 # Changes here will be overwritten by Copier
-_commit: 11.4.7
+_commit: 11.4.19
 _src_path: https://github.com/datarobot-community/af-component-llm
 base_answers_file: .datarobot/answers/base.yml
-llm_app_model_name: azure-openai-gpt-4
 llm_app_name: llm

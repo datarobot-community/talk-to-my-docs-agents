@@ -23,7 +23,9 @@ def train(
     iterations: int = 5,
     inputs: Dict[str, Any] = {"topic": "CrewAI Training"},
     skip_files: bool = False,
-    filename: Path = Path(__file__).parent / "custom_model" / "trained_agents_data.pkl",
+    filename: Path = Path(__file__).parent.parent
+    / "custom_model"
+    / "trained_agents_data.pkl",
 ) -> None:
     agents = MyAgent()
     if "knowledge_base" in inputs:
@@ -33,7 +35,7 @@ def train(
         inputs["topic"] = inputs["knowledge_base"]["description"]
     else:
         inputs["knowledge_base"] = ""
-    crew = agents.build_crewai_workflow()
+    crew = agents.crew()
     if skip_files:
         crew.agents = [
             agent for agent in crew.agents if agent.role not in ["Files Agent"]

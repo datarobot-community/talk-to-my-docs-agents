@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,13 +19,12 @@ DataRobot credentials automatically.
 """
 
 from typing import Any
-from urllib.parse import urlparse
 
 from datarobot.core.config import DataRobotAppFrameworkBaseSettings
 from pydantic import Field, model_validator
 
 
-class Config(DataRobotAppFrameworkBaseSettings):
+class Config(DataRobotAppFrameworkBaseSettings):  # type: ignore[misc]
     """
     This class finds variables in the priority order of: env
     variables (including Runtime Parameters), .env, file_secrets, then
@@ -38,17 +37,9 @@ class Config(DataRobotAppFrameworkBaseSettings):
     mcp_deployment_id: str | None = None
     external_mcp_url: str | None = None
 
-    agent_endpoint: str = Field(
-        default="http://localhost:8842",
-        validation_alias="AGENT_RETRIEVAL_AGENT_ENDPOINT",
+    local_dev_port: int = Field(
+        default=8842, validation_alias="AGENT_RETRIEVAL_AGENT_PORT", ge=1, le=65535
     )
-
-    @property
-    def local_dev_port(self) -> int:
-        parsed_url = urlparse(self.agent_endpoint)
-        if parsed_url.port:
-            return parsed_url.port
-        raise ValueError(f"No port in {self.agent_endpoint}")
 
     @model_validator(mode="before")
     @classmethod

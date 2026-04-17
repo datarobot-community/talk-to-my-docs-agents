@@ -160,11 +160,13 @@ def create_app(
     app.include_router(api_router)
 
     # This is the base path for the app, used to serve static files and templates
-    app.mount(
-        "/assets",
-        StaticFiles(directory=STATIC_DIR / "assets"),
-        name="static",
-    )
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=assets_dir),
+            name="static",
+        )
 
     # This is the final path that serves the React app
     @app.get("{full_path:path}")

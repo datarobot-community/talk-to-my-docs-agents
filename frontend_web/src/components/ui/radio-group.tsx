@@ -28,29 +28,19 @@ function RadioGroupItem({
             data-slot="radio-group-item"
             className={cn(
                 // base
-                'peer aspect-square size-4 shrink-0 rounded-full text-accent outline-none',
+                'peer text-accent aspect-square size-4 shrink-0 rounded-full outline-none',
                 // borders
-                'border border-primary shadow-xs transition-[color,box-shadow]',
+                'border-primary border shadow-xs transition-[color,box-shadow]',
                 // focus
-                'focus-visible:border-ring focus-visible:ring-[1px] focus-visible:ring-ring',
+                'focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-[1px]',
                 // invalid
-                `
-          aria-invalid:border-destructive aria-invalid:ring-destructive/20
-          dark:aria-invalid:ring-destructive/40
-        `,
+                `aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40`,
                 // disabled
-                `
-          disabled:cursor-not-allowed disabled:border-muted-foreground disabled:text-muted-foreground
-          disabled:[&_[data-slot=radio-group-indicator]_svg]:fill-muted-foreground
-        `,
+                `disabled:border-muted-foreground disabled:text-muted-foreground disabled:[&_[data-slot=radio-group-indicator]_svg]:fill-muted-foreground disabled:cursor-not-allowed`,
                 // checked
                 'enabled:data-[state=checked]:border-accent',
                 // hover
-                `
-          enabled:hover:border-[color-mix(in_srgb,var(--accent)_80%,white)] enabled:hover:text-[color-mix(in_srgb,var(--accent)_80%,white)]
-          enabled:hover:data-[state=checked]:border-[color-mix(in_srgb,var(--accent)_80%,white)]
-          enabled:hover:[&_[data-slot=radio-group-indicator]_svg]:fill-[color-mix(in_srgb,var(--accent)_80%,white)]
-        `,
+                `enabled:hover:border-[color-mix(in_srgb,var(--accent)_80%,white)] enabled:hover:text-[color-mix(in_srgb,var(--accent)_80%,white)] enabled:hover:data-[state=checked]:border-[color-mix(in_srgb,var(--accent)_80%,white)] enabled:hover:[&_[data-slot=radio-group-indicator]_svg]:fill-[color-mix(in_srgb,var(--accent)_80%,white)]`,
                 className
             )}
             {...props}
@@ -59,7 +49,7 @@ function RadioGroupItem({
                 data-slot="radio-group-indicator"
                 className="relative flex items-center justify-center"
             >
-                <CircleIcon className="absolute top-1/2 left-1/2 size-2 -translate-1/2 fill-accent" />
+                <CircleIcon className="fill-accent absolute top-1/2 left-1/2 size-2 -translate-1/2" />
             </RadioGroupPrimitive.Indicator>
         </RadioGroupPrimitive.Item>
     );

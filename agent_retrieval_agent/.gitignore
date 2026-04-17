@@ -190,4 +190,4 @@ Pulumi.*.yaml
 .chainlit/translations
 
 # Rendered jinja template for runtime parameters
-agentic_workflow/model-metadata.yaml
+model-metadata.yaml

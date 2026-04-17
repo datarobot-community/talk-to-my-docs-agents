@@ -101,7 +101,7 @@ export const SettingsSources = () => {
     return (
         <div className="flex-0">
             {/* Data connections header */}
-            <div className="mb-6 border-b border-border pb-2">
+            <div className="border-border mb-6 border-b pb-2">
                 <Heading level={4}>{t('Data connections')}</Heading>
             </div>
 

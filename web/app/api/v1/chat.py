@@ -26,6 +26,7 @@ from datarobot.auth.typing import Metadata
 from datarobot.core import getenv
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from opentelemetry import trace
 from sqlalchemy.exc import NoResultFound
 
 from app.api.v1.knowledge_bases import (
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
     from app.users.user import User, UserRepository
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 chat_router = APIRouter(tags=["Chat"])
 
 DATAROBOT_IDENTITY_HEADER_NAME = "X-DataRobot-Identity-Token"
@@ -547,14 +549,28 @@ async def _send_chat_completion(
             f"{config.datarobot_endpoint.rstrip('/')}/genai/llmgw/chat/completions"
         )
 
-    completion = await litellm.acompletion(
-        messages=messages,
-        model=_normalize_model_id(model),
-        api_base=api_base,
-        extra_headers=get_extra_headers(request),
-    )
-    # Extract message content from LiteLLM response
-    llm_message_content = completion["choices"][0]["message"]["content"] or ""
+    with _tracer.start_as_current_span(f"gen_ai.chat {model}") as span:
+        span.set_attribute("gen_ai.prompt", json.dumps(messages))
+        span.set_attribute("gen_ai.request.model", model)
+        span.set_attribute("gen_ai.system", "datarobot")
+        completion = await litellm.acompletion(
+            messages=messages,
+            model=_normalize_model_id(model),
+            api_base=api_base,
+            extra_headers=get_extra_headers(request),
+        )
+        # Extract message content from LiteLLM response
+        llm_message_content = completion["choices"][0]["message"]["content"] or ""
+        span.set_attribute("gen_ai.completion", llm_message_content)
+        if hasattr(completion, "usage") and completion.usage:
+            if completion.usage.prompt_tokens:
+                span.set_attribute(
+                    "gen_ai.usage.input_tokens", completion.usage.prompt_tokens
+                )
+            if completion.usage.completion_tokens:
+                span.set_attribute(
+                    "gen_ai.usage.output_tokens", completion.usage.completion_tokens
+                )
     update_model = MessageUpdate(content=llm_message_content, in_progress=False)
     updated_message = await message_repo.update_message(
         uuid=message_uuid,
@@ -671,41 +687,48 @@ async def _send_chat_agent_completion(
     message_obj = await message_repo.get_message(message_uuid)
     chat_id = message_obj.chat_id if message_obj else None
 
-    processor = TaskProgressProcessor()
+    with _tracer.start_as_current_span(f"gen_ai.agent {llm_model}") as span:
+        span.set_attribute("gen_ai.prompt", json.dumps(messages))
+        span.set_attribute("gen_ai.request.model", llm_model)
+        span.set_attribute("gen_ai.system", "datarobot")
+        processor = TaskProgressProcessor()
 
-    async for chunk in await litellm.acompletion(
-        messages=messages,
-        stream=True,
-        extra_headers=get_extra_headers(request),
-        **agent_kwargs,
-    ):
-        if hasattr(chunk, "choices") and chunk.choices:
-            delta = chunk.choices[0].delta
-            # Check for error signaled via refusal field (set by datarobot-genai)
-            if hasattr(delta, "refusal") and delta.refusal == "error":
-                error_msg = delta.content or "Agent error with no error message"
-                logger.error(
-                    "Agent streaming error signaled via refusal field: %s", error_msg
-                )
-                raise Exception(error_msg)
-            if hasattr(delta, "content") and delta.content:
-                content = delta.content
-                if not isinstance(content, str):
-                    logger.warning(
-                        "Received non-string content in streaming delta: %s (type: %s)",
-                        content,
-                        type(content).__name__,
+        async for chunk in await litellm.acompletion(
+            messages=messages,
+            stream=True,
+            timeout=600,
+            extra_headers=get_extra_headers(request),
+            **agent_kwargs,
+        ):
+            if hasattr(chunk, "choices") and chunk.choices:
+                delta = chunk.choices[0].delta
+                # Check for error signaled via refusal field (set by datarobot-genai)
+                if hasattr(delta, "refusal") and delta.refusal == "error":
+                    error_msg = delta.content or "Agent error with no error message"
+                    logger.error(
+                        "Agent streaming error signaled via refusal field: %s",
+                        error_msg,
                     )
-                    continue
+                    raise Exception(error_msg)
+                if hasattr(delta, "content") and delta.content:
+                    content = delta.content
+                    if not isinstance(content, str):
+                        logger.warning(
+                            "Received non-string content in streaming delta: %s (type: %s)",
+                            content,
+                            type(content).__name__,
+                        )
+                        continue
 
-                task_progress = processor.process_content(content)
-                if task_progress and chat_id:
-                    stream_manager.publish(
-                        chat_id,
-                        TaskProgressEvent(data=task_progress),
-                    )
+                    task_progress = processor.process_content(content)
+                    if task_progress and chat_id:
+                        stream_manager.publish(
+                            chat_id,
+                            TaskProgressEvent(data=task_progress),
+                        )
 
-    llm_message_content = processor.flush()
+        llm_message_content = processor.flush()
+        span.set_attribute("gen_ai.completion", llm_message_content)
 
     update_model = MessageUpdate(
         content=llm_message_content,

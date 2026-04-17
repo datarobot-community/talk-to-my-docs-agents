@@ -3,12 +3,12 @@ name = "agent_retrieval_agent"
 version = "0.1.0"
 description = "Implementation of agent_retrieval_agent"
 readme = "README.md"
-requires-python = ">=3.10, <3.13"
+requires-python = ">=3.11, <3.14"
 dependencies = [
-    "datarobot-genai[crewai]>=0.3.2,<0.4.0",
-    "datarobot-moderations>=11.2.4,<11.3.0",
-    "datarobot-drum>=1.17.5,<1.18.0",
-    "datarobot-mlops>=11.1.0",
+    "datarobot-genai[crewai, dragent]==0.10.0",
+    "datarobot-moderations==11.2.20",
+    "datarobot-drum==1.17.11.post1",  # Lift upper limit after asyncio migration finished
+    "datarobot-mlops==11.1.0",
     "openai>=1.81.0,<2.0.0",
     "litellm>=1.72.1,<2.0.0,!=1.82.7,!=1.82.8",
     "langchain-litellm>=0.2.3",
@@ -19,8 +19,7 @@ dependencies = [
     "aiosqlite>=0.21.0,<0.22",
     "datarobot[auth-authlib,core]>=3.9.1",
     "duckdb>=1.3.1,<1.4",
-    "fsspec==2025.3.0", # forced into slightly older version from datarobot[genai] transitive dependencies
-    "openai>=1.59.9,<2",
+    "fsspec==2025.3.0",  # forced into slightly older version from datarobot[genai] transitive dependencies
     "pdf2image>=1.17.0",
     "pillow>=11.2.1",
     "pymupdf>=1.25.5",
@@ -29,12 +28,14 @@ dependencies = [
     "authlib>=1.6.5",
 
     # CVE fixes
-    "pdfminer.six>=20251107",
-    "langgraph-checkpoint>=3.0.0",
+    "pdfminer.six>=20251230",  # CVE fix
+    "langgraph-checkpoint>=3.0.0",  # CVE fix
+    "nltk>=3.9.3",  # CVE fix
     "urllib3>=2.6.3",  # CVE-2025-66418, CVE-2025-66471, CVE-2026-21441
     "langchain-core>=0.3.81,<2.0.0",  # CVE-2025-68664 (CRITICAL), CVE-2025-65106 (HIGH)
     "mcp>=1.23.0",  # CVE-2025-66416
-    # Note: nbconvert 7.16.6 has CVE-2025-53000 (HIGH) - no fix available yet (marked as "affected")
+    "anyio>=4.11.0,<4.12.0",  # Fix: ImportError: `set_current_async_library`
+    "packaging>=25.0,<26.0",
 ]
 
 [project.optional-dependencies]
@@ -49,9 +50,7 @@ dev = [
     "ruff>=0.12.0",
     "types-requests>=2.32.4.20250913",
     "yamlfix>=1.17.0",
-]
-chainlit = [
-    "chainlit>=2.9.0",
+    "debugpy>=1.8.20",
 ]
 # Additional dependencies required to run the agent in DataRobot Agentic playground
 agentic_playground = [
@@ -68,7 +67,7 @@ agentic_playground = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-pythonpath = ["agentic_workflow"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 
 [tool.ruff]
@@ -115,7 +114,7 @@ target-version = "py311"
 # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
 # McCabe complexity (`C901`) by default.
 select = ["E4", "E7", "E9", "F", "I"]
-ignore = []
+ignore = ["PLC0415"]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
@@ -169,6 +168,7 @@ exclude = """(?x)(
     | .cache
     | e2e/
     | tests/
+    | build/
   )"""
 check_untyped_defs = true
 disallow_any_generics = true
@@ -191,33 +191,47 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = "datarobot.*"
 implicit_reexport = true
+follow_imports = "skip"
 
 
 [tool.uv]
 required-version = ">=0.7.0"
 override-dependencies = [
-    "fastapi>=0.118.2,<0.122.0",
+    "fastapi>=0.118.2,<0.133.0",  # 0.132 is the last version compatiable with NAT 1.4.1
     "ragas>=0.3.8",
-    "starlette>=0.49.1",
+    "starlette>=0.49.1,<1.0.0",  # 0.52.1 is the last version compatiable with NAT 1.4.1
+    "pyarrow==21.0.0",
+    # There is an incompatiblity between the opentelemetry-semantic-conventions-ai==0.4.14
+    # and crewai==1.9.3. See BUZZOK-29568 for more info.
+    "opentelemetry-semantic-conventions-ai==0.4.13",
+    # nvidia-nat-crewai==1.4.1 pins crewai<1.0.0 but datarobot-genai requires crewai>=1.1.0.
+    # Override until nvidia-nat-crewai ships a fix upstream (BUZZOK-29844).
+    # Upstream issue: https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1802
+    "crewai[litellm]>=1.1.0,<2.0.0",
+    "litellm>=1.72.1,<2.0.0,!=1.82.7,!=1.82.8",
+    "gevent; sys_platform == 'never'",  # not used; therefore removed
+    "onnxruntime; sys_platform == 'never'",  # not used; therefore removed
+    "fastembed; sys_platform == 'never'",  # not used; therefore removed
+]
+package = true
+environments = [
+  "sys_platform == 'darwin'",
+  "sys_platform == 'linux'",
+  "sys_platform == 'win32'"
 ]
 
 # This can be set to allow for proxy indexes in air-gapped environments
-# [tool.uv.pip]
-# extra-index-url = ["https://pypi.org/simple/"]
+# [[tool.uv.index]]
+# name = "mirror"
+# url = "https://mirror_url/"
 
 [dependency-groups]
-extras = [
-    # core dependencies
-    "aiosqlite>=0.21.0,<0.22",
-    "datarobot[auth-authlib,core]>=3.9.1",
-    "duckdb>=1.3.1,<1.4",
-    "fsspec==2025.3.0", # forced into slightly older version from datarobot[genai] transitive dependencies
-    "openai>=1.59.9,<2",
-    "pdf2image>=1.17.0",
-    "pillow>=11.2.1",
-    "pymupdf>=1.25.5",
-    "python-docx>=1.1.2",
-    "python-pptx>=1.0.2",
-    "authlib>=1.6.5",
-]
+extras = []
 
+
+[project.entry-points.'nat.plugins']
+crewai_agent = "agent.register"
+
+
+[tool.setuptools.packages.find]
+include = ["agent*"]

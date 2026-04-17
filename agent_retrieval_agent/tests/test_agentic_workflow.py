@@ -1,4 +1,4 @@
-# Copyright 2025 DataRobot, Inc.
+# Copyright 2026 DataRobot, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,9 +16,17 @@ import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
+from copy import copy
+from unittest.mock import ANY, MagicMock, Mock, patch
 
 import pytest
+from ag_ui.core import (
+    EventType,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageChunkEvent,
+    UserMessage,
+)
 
 
 class TestCustomModel:
@@ -30,7 +38,7 @@ class TestCustomModel:
         assert isinstance(event_loop, type(asyncio.get_event_loop()))
         thread_pool_executor.shutdown()
 
-    @patch("custom.MyAgent")
+    @patch("agent.myagent.MyAgent")
     @patch.dict(os.environ, {"LLM_DEPLOYMENT_ID": "TEST_VALUE"}, clear=True)
     @pytest.mark.parametrize("stream", [False, True])
     def test_chat(self, mock_agent, mock_agent_response, stream, load_model_result):
@@ -38,7 +46,7 @@ class TestCustomModel:
 
         # Setup mocks
         mock_agent_instance = MagicMock()
-        mock_agent_instance.invoke = AsyncMock(return_value=mock_agent_response)
+        mock_agent_instance.invoke = Mock(return_value=mock_agent_response)
         mock_agent.return_value = mock_agent_instance
 
         completion_create_params = {
@@ -47,84 +55,188 @@ class TestCustomModel:
             "environment_var": True,
             "stream": stream,
         }
-
-        response = chat(completion_create_params, load_model_result=load_model_result)
-
-        # Assert results
-        actual = json.loads(response.model_dump_json())
-        expected = {
-            "id": ANY,
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "index": 0,
-                    "logprobs": None,
-                    "message": {
-                        "content": "agent result",
-                        "refusal": None,
-                        "role": "assistant",
-                        "annotations": None,
-                        "audio": None,
-                        "function_call": None,
-                        "tool_calls": None,
-                    },
-                }
-            ],
-            "created": ANY,
-            "model": "test-model",
-            "object": "chat.completion",
-            "service_tier": None,
-            "system_fingerprint": None,
-            "usage": {
-                "completion_tokens": 1,
-                "prompt_tokens": 2,
-                "total_tokens": 3,
-                "completion_tokens_details": None,
-                "prompt_tokens_details": None,
-            },
-            "pipeline_interactions": ANY,
+        kwargs = {
+            "headers": {
+                "x-datarobot-api-key": "secret-key",
+                "x-datarobot-api-token": "secret-token",
+            }
         }
-        assert actual == expected
 
-        # Verify mocks were called correctly
-        mock_agent.assert_called_once_with(**completion_create_params)
-        mock_agent_instance.invoke.assert_called_once_with(
-            completion_create_params={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": '{"topic": "test"}'}],
-                "environment_var": True,
-                "stream": stream,
-                "authorization_context": {},
-                "forwarded_headers": {},
-            },
+        response = chat(
+            copy(completion_create_params),
+            load_model_result=load_model_result,
+            **kwargs,
         )
 
-    @patch("custom.MyAgent")
+        if stream:
+            actual_list = [json.loads(chunk.model_dump_json()) for chunk in response]
+            expected_list = [
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "agent result",
+                                "function_call": None,
+                                "refusal": None,
+                                "role": "assistant",
+                                "tool_calls": None,
+                            },
+                            "finish_reason": None,
+                            "index": 0,
+                            "logprobs": None,
+                        },
+                    ],
+                    "created": ANY,
+                    "event": ANY,
+                    "id": ANY,
+                    "model": "test-model",
+                    "object": "chat.completion.chunk",
+                    "pipeline_interactions": None,
+                    "service_tier": None,
+                    "system_fingerprint": None,
+                    "usage": {
+                        "completion_tokens": 1,
+                        "completion_tokens_details": None,
+                        "prompt_tokens": 2,
+                        "prompt_tokens_details": None,
+                        "total_tokens": 3,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": None,
+                                "function_call": None,
+                                "refusal": None,
+                                "role": "assistant",
+                                "tool_calls": None,
+                            },
+                            "finish_reason": "stop",
+                            "index": 0,
+                            "logprobs": None,
+                        },
+                    ],
+                    "created": ANY,
+                    "event": None,
+                    "id": ANY,
+                    "model": "test-model",
+                    "object": "chat.completion.chunk",
+                    "pipeline_interactions": ANY,
+                    "service_tier": None,
+                    "system_fingerprint": None,
+                    "usage": {
+                        "completion_tokens": 1,
+                        "completion_tokens_details": None,
+                        "prompt_tokens": 2,
+                        "prompt_tokens_details": None,
+                        "total_tokens": 3,
+                    },
+                },
+            ]
+            assert actual_list == expected_list
+        else:
+            actual = json.loads(response.model_dump_json())
+            # Assert results
+            expected = {
+                "id": ANY,
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "index": 0,
+                        "logprobs": None,
+                        "message": {
+                            "content": "agent result",
+                            "refusal": None,
+                            "role": "assistant",
+                            "annotations": None,
+                            "audio": None,
+                            "function_call": None,
+                            "tool_calls": None,
+                        },
+                    }
+                ],
+                "created": ANY,
+                "model": "test-model",
+                "object": "chat.completion",
+                "service_tier": None,
+                "system_fingerprint": None,
+                "usage": {
+                    "completion_tokens": 1,
+                    "prompt_tokens": 2,
+                    "total_tokens": 3,
+                    "completion_tokens_details": None,
+                    "prompt_tokens_details": None,
+                },
+                "pipeline_interactions": ANY,
+            }
+            assert actual == expected
+
+        # Verify mocks were called correctly
+        mock_agent.assert_called_once_with(
+            forwarded_headers=kwargs["headers"],
+            verbose=True,
+            timeout=300,
+            tools=[],
+        )
+        assert mock_agent_instance.invoke.called
+        assert mock_agent_instance.invoke.call_args[0][0].messages == [
+            UserMessage(
+                id="message_0",
+                role="user",
+                content='{"topic": "test"}',
+                name=None,
+                encrypted_value=None,
+            ),
+        ]
+
+    @patch("agent.myagent.MyAgent")
     @patch.dict(os.environ, {"LLM_DEPLOYMENT_ID": "TEST_VALUE"}, clear=True)
     def test_chat_streaming(self, mock_agent, load_model_result):
         from custom import chat
 
-        # Create a generator that yields streaming responses
+        # Create a generator that yields AG-UI event streaming responses
         async def mock_streaming_generator():
             yield (
-                "chunk1",
+                RunStartedEvent(
+                    type=EventType.RUN_STARTED,
+                    thread_id="t",
+                    run_id="r",
+                ),
+                None,
+                {"completion_tokens": 0, "prompt_tokens": 0, "total_tokens": 0},
+            )
+            yield (
+                TextMessageChunkEvent(
+                    type=EventType.TEXT_MESSAGE_CHUNK,
+                    message_id="m1",
+                    delta="chunk1",
+                ),
                 None,
                 {"completion_tokens": 1, "prompt_tokens": 2, "total_tokens": 3},
             )
             yield (
-                "chunk2",
+                TextMessageChunkEvent(
+                    type=EventType.TEXT_MESSAGE_CHUNK,
+                    message_id="m1",
+                    delta="chunk2",
+                ),
                 None,
                 {"completion_tokens": 2, "prompt_tokens": 2, "total_tokens": 4},
             )
             yield (
-                "",
+                RunFinishedEvent(
+                    type=EventType.RUN_FINISHED,
+                    thread_id="t",
+                    run_id="r",
+                ),
                 Mock(model_dump_json=MagicMock(return_value="interactions")),
                 {"completion_tokens": 3, "prompt_tokens": 2, "total_tokens": 5},
             )
 
         # Setup mocks
         mock_agent_instance = MagicMock()
-        mock_agent_instance.invoke = AsyncMock(return_value=mock_streaming_generator())
+        mock_agent_instance.invoke = Mock(return_value=mock_streaming_generator())
         mock_agent.return_value = mock_agent_instance
 
         completion_create_params = {
@@ -133,8 +245,18 @@ class TestCustomModel:
             "stream": True,
             "environment_var": True,
         }
+        kwargs = {
+            "headers": {
+                "x-datarobot-api-key": "secret-key",
+                "x-datarobot-api-token": "secret-token",
+            }
+        }
 
-        response = chat(completion_create_params, load_model_result=load_model_result)
+        response = chat(
+            copy(completion_create_params),
+            load_model_result=load_model_result,
+            **kwargs,
+        )
 
         # Verify response is an iterator
         assert hasattr(response, "__iter__")
@@ -166,7 +288,19 @@ class TestCustomModel:
         assert final_chunk["usage"]["total_tokens"] == 5
 
         # Verify mocks were called correctly
-        mock_agent.assert_called_once_with(**completion_create_params)
-        mock_agent_instance.invoke.assert_called_once_with(
-            completion_create_params=completion_create_params
+        mock_agent.assert_called_once_with(
+            forwarded_headers=kwargs["headers"],
+            verbose=True,
+            timeout=300,
+            tools=[],
         )
+        assert mock_agent_instance.invoke.called
+        assert mock_agent_instance.invoke.call_args[0][0].messages == [
+            UserMessage(
+                id="message_0",
+                role="user",
+                content='{"topic": "test"}',
+                name=None,
+                encrypted_value=None,
+            ),
+        ]

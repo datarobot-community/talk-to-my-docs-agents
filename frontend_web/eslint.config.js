@@ -56,7 +56,7 @@ export default defineConfig(
             'better-tailwindcss': eslintPluginBetterTailwindcss,
         },
         rules: {
-            'better-tailwindcss/enforce-consistent-class-order': ['error', { order: 'official' }],
+            'better-tailwindcss/enforce-consistent-class-order': 'off',
             'better-tailwindcss/enforce-shorthand-classes': 'error',
             'better-tailwindcss/no-conflicting-classes': 'error',
             'better-tailwindcss/no-duplicate-classes': 'error',

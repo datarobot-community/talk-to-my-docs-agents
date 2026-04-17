@@ -7,13 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
 
-- User theme and language preferences. Users can set display language and theme.
+## [11.7.0] - 2026-04-17
 
-### Changed
+## Added
 
-- Settings page restructured: App Settings now includes Display (language, theme) and Data connections in a single view.
+- Added local tracing setup guide.
+- Added OpenTelemetry tracing attributes.
+- Added user display preferences for theme and language.
+- Added tooltip and copy button for chat error messages.
+
+## Changed
+
+- Improved chat error message UX and tooltip behavior.
+- Excluded kube-probe and /health requests from tracing noise.
+- Updated AF Component Agent.
+- Applied localization updates.
+- Restructured Settings: App Settings now combines Display and Data connections.
+- Synced component templates from upstream:
+ - af-component-datarobot-recipe
+ - af-component-agent
+ - af-component-base
+ - af-component-react
+ - af-component-fastapi-backend
+ - af-component-llm
+
 
 ## [11.5.2] - 2026-02-13
 

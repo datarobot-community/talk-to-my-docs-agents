@@ -22,10 +22,7 @@ const SelectTrigger = React.forwardRef<
             // Layout
             'group flex h-9 w-full items-center justify-between px-3 py-2 whitespace-nowrap',
             // Appearance
-            `
-        rounded-lg border border-border bg-input text-sm text-secondary-foreground
-        data-[placeholder]:body-secondary
-      `,
+            `border-border bg-input text-secondary-foreground data-[placeholder]:body-secondary rounded-lg border text-sm`,
             '[&>span]:line-clamp-1',
             // Interaction
             'enabled:hover:border-muted-foreground enabled:hover:data-[placeholder]:text-[color-mix(in_oklch,var(--muted-foreground)_80%,white)]',
@@ -43,10 +40,7 @@ const SelectTrigger = React.forwardRef<
         {children}
         <SelectPrimitive.Icon asChild>
             <ChevronDown
-                className={`
-          size-4 text-sidebar-primary-foreground transition-transform duration-200
-          group-data-[state=open]:rotate-180
-        `}
+                className={`text-sidebar-primary-foreground size-4 transition-transform duration-200 group-data-[state=open]:rotate-180`}
             />
         </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
@@ -95,22 +89,13 @@ const SelectContent = React.forwardRef<
                 'max-h-(--radix-select-content-available-height) min-w-[8rem]',
                 'overflow-x-hidden overflow-y-auto',
                 // Appearance
-                'rounded-lg border bg-input text-popover-foreground',
+                'bg-input text-popover-foreground rounded-lg border',
                 // Animation base
-                `
-          data-[state=closed]:animate-out
-          data-[state=open]:animate-in
-        `,
+                `data-[state=closed]:animate-out data-[state=open]:animate-in`,
                 // Fade animations
-                `
-          data-[state=closed]:fade-out-0
-          data-[state=open]:fade-in-0
-        `,
+                `data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0`,
                 // Zoom animations
-                `
-          data-[state=closed]:zoom-out-95
-          data-[state=open]:zoom-in-95
-        `,
+                `data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95`,
                 // Slide animations depending on side
                 'data-[side=bottom]:slide-in-from-top-2',
                 'data-[side=top]:slide-in-from-bottom-2',
@@ -148,7 +133,7 @@ const SelectLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
     <SelectPrimitive.Label
         ref={ref}
-        className={cn('px-4 py-2 text-sm font-semibold text-secondary-foreground', className)}
+        className={cn('text-secondary-foreground px-4 py-2 text-sm font-semibold', className)}
         {...props}
     />
 ));
@@ -166,14 +151,14 @@ const SelectItem = React.forwardRef<
             // Spacing
             'px-4 py-2',
             // Typography / Colors
-            'text-sm text-secondary-foreground',
+            'text-secondary-foreground text-sm',
             // Disabled state
             'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
             // Focus / Interaction
-            'focus:cursor-pointer focus:bg-sidebar-accent focus:outline-none',
+            'focus:bg-sidebar-accent focus:cursor-pointer focus:outline-none',
             // Checked state
             'data-[state=checked]:bg-secondary',
-            'data-[state=checked]:border-l-2 data-[state=checked]:border-accent',
+            'data-[state=checked]:border-accent data-[state=checked]:border-l-2',
             className
         )}
         {...props}
@@ -189,7 +174,7 @@ const SelectSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
     <SelectPrimitive.Separator
         ref={ref}
-        className={cn('-mx-1 my-1 h-px bg-muted', className)}
+        className={cn('bg-muted -mx-1 my-1 h-px', className)}
         {...props}
     />
 ));

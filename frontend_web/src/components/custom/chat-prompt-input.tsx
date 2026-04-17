@@ -244,7 +244,7 @@ export function ChatPromptInput({
                                                     className={cn(
                                                         'cursor-pointer',
                                                         selectedKnowledgeBaseId === base.uuid &&
-                                                            'bg-primary/10 font-semibold text-primary'
+                                                            'bg-primary/10 text-primary font-semibold'
                                                     )}
                                                 >
                                                     <BookOpenText
@@ -259,13 +259,13 @@ export function ChatPromptInput({
                                                                 'font-medium',
                                                                 selectedKnowledgeBaseId ===
                                                                     base.uuid &&
-                                                                    'font-semibold text-primary'
+                                                                    'text-primary font-semibold'
                                                             )}
                                                         >
                                                             {base.title}
                                                         </span>
 
-                                                        <span className="truncate caption-01">
+                                                        <span className="caption-01 truncate">
                                                             {t(
                                                                 '{{files}} file • {{tokens}} tokens',
                                                                 {
@@ -297,7 +297,7 @@ export function ChatPromptInput({
                                     )}
                                 </DropdownMenuContent>
                             </DropdownMenu>
-                            <p className="flex items-center gap-2 body-secondary">
+                            <p className="body-secondary flex items-center gap-2">
                                 <Info className="size-5" />
                                 {t('Upload a file or select a knowledge base')}
                             </p>
@@ -370,7 +370,7 @@ export function ChatPromptInput({
                                 </Button>
                             </div>
                             <div>
-                                <div className="mb-2 flex items-center gap-2 body-secondary">
+                                <div className="body-secondary mb-2 flex items-center gap-2">
                                     <Badge variant="info">{t('Knowledge base')}</Badge>
                                     <div className="caption-01">
                                         {t('{{files}} file • {{tokens}} tokens', {
@@ -382,7 +382,7 @@ export function ChatPromptInput({
                                     </div>
                                 </div>
                                 {!isAgentModel && (
-                                    <div className="caption-01 font-medium text-warning">
+                                    <div className="caption-01 text-warning font-medium">
                                         <TriangleAlert className="mr-1 inline-block size-4" />
                                         {t('High token usage possible')}
                                     </div>
@@ -394,12 +394,12 @@ export function ChatPromptInput({
                         <Skeleton className="my-3 h-10 w-full">
                             <div className="group flex w-full items-center gap-4 pt-2">
                                 <div className="flex w-8 items-center justify-center">
-                                    <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
+                                    <FileChartColumnIncreasing className="text-muted-foreground w-6" />
                                 </div>
                                 <div className="flex min-w-0 flex-1 flex-col">
-                                    <div className="truncate body">{fileUploadName}</div>
+                                    <div className="body truncate">{fileUploadName}</div>
                                 </div>
-                                <div className="mx-2 flex items-center body-secondary">
+                                <div className="body-secondary mx-2 flex items-center">
                                     {t('Uploading...')}
                                 </div>
                             </div>
@@ -408,11 +408,11 @@ export function ChatPromptInput({
                     {selectedFiles?.map((file, index) => (
                         <div key={index} className="group flex w-full items-center gap-4 pt-6 pb-3">
                             <div className="flex w-8 items-center justify-center">
-                                <FileChartColumnIncreasing className="w-6 text-muted-foreground" />
+                                <FileChartColumnIncreasing className="text-muted-foreground w-6" />
                             </div>
                             <div className="flex min-w-0 flex-1 flex-col">
-                                <div className="truncate body">{file.filename}</div>
-                                <div className="truncate caption-01">
+                                <div className="body truncate">{file.filename}</div>
+                                <div className="caption-01 truncate">
                                     {t('File size: {{size}}', {
                                         size: formatFileSize(file?.size_bytes || 0),
                                     })}
@@ -420,7 +420,7 @@ export function ChatPromptInput({
                             </div>
                             <div className="ml-2 flex items-center">
                                 <XIcon
-                                    className="size-4 cursor-pointer text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                                    className="text-muted-foreground size-4 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
                                     onClick={event => {
                                         event.stopPropagation();
                                         if (isDisabled) {

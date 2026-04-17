@@ -63,10 +63,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<'div'>) {
         <div
             data-slot="alert-title"
             className={cn(
-                `
-          col-start-2 line-clamp-1 min-h-4 body tracking-tight
-          [&:not(:last-child)]:mb-1
-        `,
+                `body col-start-2 line-clamp-1 min-h-4 tracking-tight [&:not(:last-child)]:mb-1`,
                 className
             )}
             {...props}
@@ -79,10 +76,7 @@ function AlertDescription({ className, ...props }: React.ComponentProps<'div'>) 
         <div
             data-slot="alert-description"
             className={cn(
-                `
-          col-start-2 grid justify-items-start gap-1 caption-01
-          [&_p]:leading-relaxed
-        `,
+                `caption-01 col-start-2 grid justify-items-start gap-1 [&_p]:leading-relaxed`,
                 className
             )}
             {...props}
@@ -95,11 +89,7 @@ function AlertFooter({ className, ...props }: React.ComponentProps<'div'>) {
         <div
             data-slot="alert-footer"
             className={cn(
-                `
-          col-start-2 mt-4 flex min-h-0 items-center gap-4 body
-          [&>*:first-child]:pl-0
-          [&>a]:no-underline
-        `,
+                `body col-start-2 mt-4 flex min-h-0 items-center gap-4 [&>*:first-child]:pl-0 [&>a]:no-underline`,
                 className
             )}
             {...props}

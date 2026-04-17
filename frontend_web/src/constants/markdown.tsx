@@ -110,7 +110,7 @@ export const MARKDOWN_COMPONENTS = {
         </td>
     ),
     a: ({ children, ...props }: MarkdownComponentProps) => (
-        <a target="_blank" className="inline-flex items-center anchor" {...props}>
+        <a target="_blank" className="anchor inline-flex items-center" {...props}>
             {children}
             <SquareArrowOutUpRight size={18} className="ml-1" />
         </a>

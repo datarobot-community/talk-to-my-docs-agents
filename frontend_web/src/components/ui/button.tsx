@@ -22,7 +22,7 @@ const BUTTON_SIZE = {
 
 const BUTTON_VARIANTS = cva(
     `
-    inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-lg text-sm font-semibold whitespace-nowrap transition-all
+    relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-lg text-sm font-semibold whitespace-nowrap transition-all
     outline-none
     focus-visible:border-ring focus-visible:ring-[1px] focus-visible:ring-ring
     disabled:pointer-events-none
@@ -67,7 +67,7 @@ const BUTTON_VARIANTS = cva(
         `,
                 [BUTTON_VARIANT.ghost]: `
           px-2
-          hover:bg-sidebar-primary hover:text-accent-foreground
+          hover:bg-sidebar-accent hover:text-accent-foreground
           disabled:text-foreground/50
         `,
                 [BUTTON_VARIANT.link]: `
