@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [11.7.1] - 2026-04-20
+
+### Security
+
+- Bumped `axios` to 1.15.1 to address denial-of-service, SSRF via NO_PROXY hostname bypass, and cloud metadata exfiltration advisories.
+
+
 ## [11.7.0] - 2026-04-17
 
 ## Added

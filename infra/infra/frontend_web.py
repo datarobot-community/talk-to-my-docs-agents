@@ -12,62 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import hashlib
 from pathlib import Path
-from typing import List
 
 import pulumi_command as command
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 
 project_dir = Path(__file__).parent.parent.parent
 
+FRONTEND_SOURCE_GLOBS = [
+    "src/**/*",
+    "public/**/*",
+    "package.json",
+    "package-lock.json",
+    "index.html",
+    "tsconfig*.json",
+    "vite.config.*",
+    "tailwind.config.*",
+    "postcss.config.*",
+    "eslint.config.*",
+    "components.json",
+    ".prettierrc*",
+    ".npmrc",
+]
 
-def _frontend_triggers(frontend_dir: Path) -> List[str]:
-    """Generate a deterministic trigger hash based on lockfile and source mtimes."""
 
-    hasher = hashlib.sha256()
-    relevant_paths = []
-
-    for relative_path in [
-        "package-lock.json",
-        "package.json",
-        "index.html",
-        "components.json",
-        "vite.config.ts",
-        "tailwind.config.js",
-        ".npmrc",
-    ]:
-        candidate = frontend_dir / relative_path
-        if candidate.exists():
-            relevant_paths.append(candidate)
-
-    tsconfig_paths = sorted(
-        path for path in frontend_dir.glob("tsconfig.*") if path.is_file()
-    )
-    relevant_paths.extend(tsconfig_paths)
-
-    src_dir = frontend_dir / "src"
-    if src_dir.exists():
-        relevant_paths.extend(
-            sorted(path for path in src_dir.rglob("*") if path.is_file())
-        )
-
-    public_dir = frontend_dir / "public"
-    if public_dir.exists():
-        relevant_paths.extend(
-            sorted(path for path in public_dir.rglob("*") if path.is_file())
-        )
-
-    for path in relevant_paths:
-        if not path.exists():
-            continue
-        relative_path = path.relative_to(frontend_dir).as_posix()
-        hasher.update(relative_path.encode())
-        hasher.update(str(path.stat().st_mtime_ns).encode())
-
-    digest = hasher.hexdigest()
-    return [digest]
+def _hash_frontend_sources(frontend_dir: Path) -> str:
+    """Compute a SHA-256 hash of all relevant frontend source files."""
+    h = hashlib.sha256()
+    seen: set[Path] = set()
+    paths: list[Path] = []
+    for pattern in FRONTEND_SOURCE_GLOBS:
+        for p in frontend_dir.glob(pattern):
+            if p.is_file() and p not in seen:
+                seen.add(p)
+                paths.append(p)
+    for p in sorted(paths):
+        h.update(str(p.relative_to(frontend_dir)).encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()
 
 
 def build_frontend() -> command.local.Command:
@@ -76,7 +59,6 @@ def build_frontend() -> command.local.Command:
     Split into two stages: install dependencies and build application.
     """
     frontend_dir = project_dir / "frontend_web"
-
     build_command = " && ".join(
         [
             f"cd {frontend_dir}",
@@ -88,7 +70,7 @@ def build_frontend() -> command.local.Command:
     build_react_app = command.local.Command(
         f"Talk to My Docs [{PROJECT_NAME}] Build Frontend",
         create=build_command,
-        triggers=_frontend_triggers(frontend_dir),
+        triggers=[_hash_frontend_sources(frontend_dir)],
     )
 
     return build_react_app
