@@ -28,6 +28,10 @@ from crewai import LLM, Agent, Crew, Process, Task
 from crewai.events import TaskCompletedEvent as CrewTaskCompletedEvent
 from crewai.events import TaskStartedEvent as CrewTaskStartedEvent
 from crewai.events import crewai_event_bus
+from crewai.events.types.logging_events import (
+    AgentLogsExecutionEvent,
+    AgentLogsStartedEvent,
+)
 from crewai.tools import BaseTool
 from datarobot_genai.core.agents import InvokeReturn
 from datarobot_genai.core.agents.base import (
@@ -41,11 +45,11 @@ from datarobot_genai.core.mcp import MCPConfig
 from datarobot_genai.crewai.agent import CrewAIAgent
 from datarobot_genai.crewai.mcp import mcp_tools_context
 from datarobot_genai.crewai.ragas_events import CrewAIRagasEventListener
+from langchain_core.agents import AgentFinish
 from openai.types.chat import CompletionCreateParams
 
-import agent.models as models
 from agent.config import Config
-from agent.core.document_loader import SUPPORTED_FILE_TYPES
+from agent.core.document_loader import EMBEDDED_DOCUMENTS_PHRASE, SUPPORTED_FILE_TYPES
 from agent.tool import (
     DocumentReadTool,
     FileListTool,
@@ -166,6 +170,11 @@ class MyAgent(CrewAIAgent):
             try:
                 inputs = json.loads(user_prompt_content)
             except json.decoder.JSONDecodeError:
+                logger.warning(
+                    "make_kickoff_inputs: failed to parse user_prompt_content as JSON "
+                    "(type: %s), falling back to plain text. knowledge_base will not be available.",
+                    type(user_prompt_content).__name__,
+                )
                 inputs = {"topic": str(user_prompt_content)}
         if "question" not in inputs:
             if "message" in inputs:
@@ -176,8 +185,22 @@ class MyAgent(CrewAIAgent):
             self._extract_and_store_knowledge_base_content(base)
             if "topic" not in inputs and "description" in base:
                 inputs["topic"] = base["description"]
+            if not self.knowledge_base_files:
+                logger.warning(
+                    "make_kickoff_inputs: knowledge_base key present but no files with "
+                    "encoded_content were extracted — routing will skip Knowledge Base Agent."
+                )
         else:
-            inputs["knowledge_base"] = ""
+            logger.info(
+                "make_kickoff_inputs: no knowledge_base in inputs, routing to other Agents."
+            )
+        inputs["knowledge_base_available"] = (
+            "true" if self.knowledge_base_files else "false"
+        )
+        logger.info(
+            "make_kickoff_inputs: knowledge_base_available=%s",
+            inputs["knowledge_base_available"],
+        )
 
         return inputs
 
@@ -203,81 +226,63 @@ class MyAgent(CrewAIAgent):
     def agent_file_searcher(self) -> Agent:
         return Agent(
             role="Files Agent",
-            goal='Find the most closely related filenames and their contents from a list of files on the topic: "{topic}" as it relates to the question: "{question}". Your services aren\'t needed if the document is in the question already.',
-            backstory="You are an expert at searching and reading files for helpful information. You can identify the most relevant"
-            "file from a list of files. You are given a list of files and a topic. ",
+            goal=dedent(
+                """
+                Find the most closely related filenames and their contents from a list of files on the topic: "{topic}"
+                as it relates to the question: "{question}".
+                Only select files if they are very clearly relevant — the chance is quite low.
+                Only return files with extensions in: """
+                + str(SUPPORTED_FILE_TYPES)
+                + dedent(""".
+                If no relevant files are found, state that no file content is available.
+                When reading file content, think deeply, summarize concisely, and provide a synthesized answer only.
+                Do not reproduce substantial portions or the full text of documents.
+            """)
+            ).strip(),
+            backstory=dedent("""
+                You are an expert at searching and reading files for helpful information.
+                You can identify the most relevant file from a list of files and summarize its contents accurately.
+                You always use the file list tool first to see what is available, then read only the most relevant files.
+            """).strip(),
             allow_delegation=False,
             verbose=self.verbose,
             max_iter=3,
+            tools=[self.file_list_tool, self.document_read_tool]
+            + list(self.tools or []),
             llm=self.llm(
                 preferred_model="datarobot/bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
             ),
         )
 
     @property
-    def task_file_search(self) -> Task:
-        return Task(
-            name="Searching files",
-            description=dedent(
-                """
-                Find the most relevant files to "{topic}" and "{question}" from a list of files.
-                You should always use your tools to determine what files are available.
-                Your task is complete if no files are relevant.
-
-                The chance that the files are relevant is quite low,
-                so you should only select files if they are very clearly relevant.
-                Please return only filenames that have extensions in the approved extension list.
-                This extension list is: """
-                + str(SUPPORTED_FILE_TYPES)
-                + """.
-
-                If no relevant files are found, return an empty array.
-            """
-            ).strip(),
-            expected_output="A JSON object with an array of file paths",
-            output_pydantic=models.FileSearchOutput,
-            agent=self.agent_file_searcher,
-            tools=[self.file_list_tool],
-        )
-
-    @property
-    def task_write(self) -> Task:
-        return Task(
-            name="Reading content",
-            description=dedent("""
-                1. Read the contents of the files you are given.
-                2. Think and understand deeply the contents of the file.
-                3. Determine the best way to summarize this information in a concise and understandable way.
-                4. Create a summary that answers the question, "{question}".
-                5. Critical: Do not reproduce substantial portions or the full text of the documents. Provide a synthesized answer only.
-
-                It is extremely critical that you do your best to answer this question.
-                If no file was provided by the file searcher, state 'No file content available to answer the question.'
-            """).strip(),
-            expected_output="A well-written summary that answers the question in markdown format, or a clear statement if no file content is available.",
-            agent=self.agent_file_searcher,
-            tools=[self.document_read_tool],
-        )
-
-    @property
     def document_in_question_agent(self) -> Agent:
-        """An agent that can be used to answer questions about a document."""
         return Agent(
             role="Document Agent",
-            goal=dedent("""
+            goal=dedent(
+                """
                 If the question: "{question}" contains the phrase:
-                "Here are the relevant documents with each document separated by three dashes",
-                then you should read the pages of the documents from the question and answer the question prior to that phrase.
-            """).strip(),
+                \""""
+                + EMBEDDED_DOCUMENTS_PHRASE
+                + dedent("""",
+                separate the question from the document content, read the document pages, think deeply,
+                and answer the question part concisely. Do not include a verbatim copy of the document in your answer.
+            """)
+            ).strip(),
             backstory=dedent("""
-                You are an expert at reading documents and answering questions about them, and when the question includes a document,
-                you'll know you should take action to respond to it.
+                You are an expert at reading documents and answering questions about them.
+                When the question includes an embedded document, you carefully separate the question from the content,
+                summarize concisely, and never reproduce the full document text.
+                If the question does NOT contain the embedded document phrase, respond immediately:
+                "No embedded document was provided. I cannot answer without one."
+                Do not use any other knowledge or context to answer in that case.
             """).strip(),
             allow_delegation=False,
             max_iter=5,
             verbose=self.verbose,
-            llm=self.llm(),
-            tools=self.tools,
+            tools=list(self.tools or []),
+            llm=self.llm(
+                preferred_model="datarobot/azure/gpt-4o-2024-11-20",
+            ),
         )
 
     @property
@@ -285,65 +290,40 @@ class MyAgent(CrewAIAgent):
         """An agent that searches through knowledge base files and answers questions using their content."""
         return Agent(
             role="Knowledge Base Agent",
-            goal=(
-                "Given a knowledge base with files and limited content previews, first identify the most relevant files "
-                'for answering the question: "{question}", then retrieve and analyze their full content to provide a comprehensive answer.'
-            ),
-            backstory=(
-                "You are an expert at both analyzing file metadata and reading comprehensive document content. "
-                "You can identify the most relevant files from knowledge base systems where full content isn't immediately available, "
-                "and then synthesize information from multiple documents to provide accurate, well-sourced answers. "
-                "You have a two-step process: first analyze file previews to select relevant files, then read their full content to answer questions."
-            ),
-            allow_delegation=True,
-            verbose=self.verbose,
-            llm=self.llm(),
-            tools=self.tools,
-        )
+            goal=dedent("""
+                Given a knowledge base with files and limited content previews, first identify the most relevant files
+                for answering the question: "{question}" on the topic: "{topic}",
+                then retrieve and analyze their full content to provide a comprehensive answer.
 
-    @property
-    def task_knowledge_base_content_answer(self) -> Task:
-        return Task(
-            name="Analyzing knowledge base",
-            description=dedent("""
-                IMPORTANT: You have previously identified relevant file UUIDs in your previous task output.
-                You must carefully examine the context from your previous task to extract these UUIDs.
-                CRITICAL: You MUST use your tool to get the content from those files
-
-                Using your full content tool is expensive, so be sure to search first using the UUIDs you found,
-                and then decide if you need to read the full content.
-
-                Your task:
-                1. Look at the output from your previous Knowledge Base File Search task
-                2. Find any lines that start with '- ' followed by a UUID in standard format
-                3. Extract ALL actual UUIDs from those lines (NOT the examples from instructions)
-                4. Search the contents of those UUIDs using keywords and/or regex patterns from the question
-                5. If you do not have UUIDs, use search to find them.
-                5. Use the search results to determine which files are most relevant from the list of UUIDs
-                6. Use the knowledge base content tool with the extracted UUIDs as a list if you think the search
-                   results weren't sufficient to answer the question properly
-                7. Read and understand the content deeply
-                8. Create a comprehensive answer to the question: "{question}" on the topic "{topic}"
-
-                CRITICAL INSTRUCTIONS:
-                - Never call the tool with an empty list
-                - Only call the tool with UUIDs you extracted from your previous output
-                - Never call the Knowledge Base Content Tool more than once!!!
-                - Ignore any example UUIDs from instructions or documentation
-                - If no UUIDs were found in your previous output, respond that no relevant files were identified
+                When selecting files, only use the 'uuid' key — never owner_uuid or project_uuid.
+                Always search first using keywords or regex before fetching full content.
+                Never call the content tool with an empty list.
+                Never call the content tool more than once.
+                If no UUIDs are found, respond that no relevant files were identified.
             """).strip(),
-            expected_output="A comprehensive, well-formatted markdown summary answering the question using the knowledge base content.",
-            agent=self.knowledge_base_agent,
-            tools=[self.knowledge_base_content_tool, self.knowledge_base_search_tool],
+            backstory=dedent("""
+                You are an expert at analyzing file metadata and reading comprehensive document content.
+                You follow a strict two-step process: first use the search tool to find relevant content by UUID,
+                then use the content tool only if the search results weren't sufficient to answer the question.
+                You synthesize information accurately and never reproduce raw tool output.
+            """).strip(),
+            allow_delegation=False,
+            verbose=self.verbose,
+            max_iter=5,
+            tools=[self.knowledge_base_content_tool, self.knowledge_base_search_tool]
+            + list(self.tools or []),
+            llm=self.llm(
+                preferred_model="datarobot/vertex_ai/gemini-2.5-flash",
+            ),
         )
 
     @property
-    def finalizer_agent(self) -> Agent:
-        """An agent that coordinates and finalizes the outputs from all other agents."""
+    def manager_agent(self) -> Agent:
+        """Coordinates specialist agents and synthesizes a final response."""
         return Agent(
-            role="Finalizer Agent",
+            role="Manager Agent",
             goal=(
-                "Analyze the outputs from all previous agents and provide a single, coherent, well-formatted answer to the question: "
+                "Analyze the outputs from all delegated agents and provide a single, coherent, well-formatted answer to the question: "
                 '"{question}" from the topic: "{topic}"'
             ),
             backstory=(
@@ -353,27 +333,39 @@ class MyAgent(CrewAIAgent):
                 "You never output raw tool results, full documents, or incomplete information."
             ),
             max_iter=5,
-            allow_delegation=False,
+            allow_delegation=True,
             verbose=self.verbose,
             llm=self.llm(
-                preferred_model="datarobot/vertex_ai/gemini-2.5-flash",
+                preferred_model="datarobot/bedrock/anthropic.claude-sonnet-4-20250514-v1:0"
             ),
         )
 
     @property
-    def task_finalize_response(self) -> Task:
+    def task_answer_question(self) -> Task:
         return Task(
-            name="Preparing response",
-            description=dedent("""
-                Analyze all the outputs from the previous agents and create a single, coherent answer to: "{question}".
+            name="Delegating question",
+            description=dedent(
+                """
+                Answer the question: "{question}" on the topic: "{topic}".
 
-                You have access to:
-                1. File search results and file-based content analysis
-                2. Embedded document analysis (if present in the question)
-                3. Knowledge base search and content analysis
+                Determine the correct source and delegate to exactly one specialist:
 
-                Your job is to:
-                1. Determine which agents found relevant information
+                1. EMBEDDED DOCUMENT — if the question contains the phrase \""""
+                + EMBEDDED_DOCUMENTS_PHRASE
+                + dedent("""",
+                   delegate to the Document Agent.
+
+                2. KNOWLEDGE BASE — knowledge base available: {knowledge_base_available}.
+                   If "true", delegate to the Knowledge Base Agent.
+
+                3. SAMPLE FILES — if neither of the above applies,
+                   delegate to the Files Agent to search for relevant local files.
+
+                4. NO SOURCE — if no relevant content was found from any source,
+                   state that no document source is available.
+
+                After collecting the specialist's response:
+                1. Determine if the agent answer matches the user prompt. If the agent returned an empty or failed response, retry the same specialist once. If still empty or not relevant, fall back through the priority chain: Knowledge Base Agent → Document Agent → Files Agent — stopping as soon as one returns a relevant answer.
                 2. Synthesize the most relevant and accurate information
                 3. Create a well-formatted, comprehensive response
                 4. Ignore any 'not available' or 'not found' responses
@@ -381,28 +373,22 @@ class MyAgent(CrewAIAgent):
                 6. If no sources provide useful information, clearly state that no relevant information was found
 
                 Never output raw tool results, file paths, or technical details - only the final answer.
-            """).strip(),
+            """)
+            ).strip(),
             expected_output="A single, well-formatted markdown response that directly answers the user's question using the most relevant information found by all agents.",
-            agent=self.finalizer_agent,
         )
 
     @property
     def agents(self) -> list[Agent]:
         return [
-            self.agent_file_searcher,
             self.document_in_question_agent,
             self.knowledge_base_agent,
-            self.finalizer_agent,
+            self.agent_file_searcher,
         ]
 
     @property
     def tasks(self) -> list[Task]:
-        return [
-            self.task_file_search,
-            self.task_write,
-            self.task_knowledge_base_content_answer,
-            self.task_finalize_response,
-        ]
+        return [self.task_answer_question]
 
     def _extract_and_store_knowledge_base_content(self, base: dict[str, Any]) -> None:
         """Extracts and stores the encoded content from knowledge base files."""
@@ -413,9 +399,6 @@ class MyAgent(CrewAIAgent):
                     continue
                 self.knowledge_base_files[file_uuid] = file_info["encoded_content"]
                 del file_info["encoded_content"]
-                file_info["encoded_content"] = self.knowledge_base_files[file_uuid].get(
-                    "1", ""
-                )[:500]  # preview
 
     def crew(self) -> Crew:
         """Override base class crew() to customize Crew options."""
@@ -423,8 +406,8 @@ class MyAgent(CrewAIAgent):
             agents=self.agents,
             tasks=self.tasks,
             verbose=self.verbose,
-            process=Process.sequential,
-            stream=False,
+            process=Process.hierarchical,
+            manager_agent=self.manager_agent,
         )
 
     async def invoke(self, run_agent_input: Any) -> InvokeReturn:
@@ -460,6 +443,12 @@ class MyAgent(CrewAIAgent):
             default_usage_metrics(),
         )
 
+        agent_display_task: dict[str, str] = {
+            "Document Agent": "Analyzing content",
+            "Knowledge Base Agent": "Analyzing knowledge base",
+            "Files Agent": "Analyzing files",
+        }
+
         with crewai_event_bus.scoped_handlers():
             ragas_listener = CrewAIRagasEventListener()
             ragas_listener.setup_listeners(crewai_event_bus)
@@ -468,23 +457,38 @@ class MyAgent(CrewAIAgent):
             def _on_task_started(_: Any, event: Any) -> None:
                 task = getattr(event, "task", None)
                 agent = getattr(task, "agent", None)
-                role = getattr(agent, "role", "") if agent else ""
+                role = getattr(agent, "role", "") if agent else "Manager Agent"
                 name = getattr(task, "name", "") or ""
                 step_name = f"{role}: {name}" if role and name else role or name
-                print(
-                    f"[invoke] TaskStartedEvent fired: step_name={step_name!r}",
-                    flush=True,
-                )
-                logger.info(f"[invoke] TaskStartedEvent fired: step_name={step_name!r}")
                 loop.call_soon_threadsafe(step_queue.put_nowait, ("start", step_name))
 
             @crewai_event_bus.on(CrewTaskCompletedEvent)
             def _on_task_completed(_: Any, event: Any) -> None:
-                logger.info("[invoke] TaskCompletedEvent fired")
                 loop.call_soon_threadsafe(step_queue.put_nowait, ("end", ""))
 
+            @crewai_event_bus.on(AgentLogsStartedEvent)
+            def _on_agent_logs_started(_: Any, event: Any) -> None:
+                role = getattr(event, "agent_role", "")
+                if role == "Manager Agent":
+                    return
+                task_name = agent_display_task.get(role, "Working")
+                loop.call_soon_threadsafe(
+                    step_queue.put_nowait, ("start", f"{role}: {task_name}")
+                )
+
+            @crewai_event_bus.on(AgentLogsExecutionEvent)
+            def _on_agent_logs_execution(_: Any, event: Any) -> None:
+                role = getattr(event, "agent_role", "")
+                if role == "Manager Agent":
+                    return
+                if not isinstance(
+                    getattr(event, "formatted_answer", None), AgentFinish
+                ):
+                    return
+                loop.call_soon_threadsafe(step_queue.put_nowait, ("end", ""))
+
+            kickoff_inputs = self.make_kickoff_inputs(user_prompt_content)
             crew = self.crew()
-            kickoff_inputs = self.make_kickoff_inputs(str(user_prompt_content))
 
             print("[invoke] Starting crew as background task", flush=True)
             logger.info("[invoke] Starting crew as background task")

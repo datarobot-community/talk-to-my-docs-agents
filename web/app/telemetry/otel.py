@@ -163,6 +163,25 @@ class OTel:
                     "OTEL_EXPORTER_OTLP_ENDPOINT not set. Disabling telemetry to prevent connection errors."
                 )
 
+        # Fail loudly if a remote endpoint is set but auth headers are missing — requests will be rejected.
+        # Skip this check for localhost endpoints (local collectors don't require auth).
+        _endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+        _is_remote = (
+            _endpoint and "localhost" not in _endpoint and "127.0.0.1" not in _endpoint
+        )
+        if (
+            self.telemetry_enabled
+            and _is_remote
+            and not os.environ.get("OTEL_EXPORTER_OTLP_HEADERS")
+        ):
+            self.telemetry_enabled = False
+            logging.getLogger(__name__).error(
+                "OTEL_EXPORTER_OTLP_ENDPOINT is set to a remote URL but OTEL_EXPORTER_OTLP_HEADERS is missing. "
+                "All telemetry requests will be rejected (401). Disabling telemetry. "
+                "Run scripts/create_tracing_shell.sh to get the required credentials, "
+                "then add OTEL_EXPORTER_OTLP_HEADERS to your .env file."
+            )
+
         self._logger_provider: Optional[LoggerProvider] = None
         self._meter_provider: Optional[MeterProvider] = None
         self._tracer_provider: Optional[TracerProvider] = None

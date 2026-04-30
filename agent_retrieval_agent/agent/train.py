@@ -40,11 +40,6 @@ def train(
         crew.agents = [
             agent for agent in crew.agents if agent.role not in ["Files Agent"]
         ]
-        crew.tasks = [
-            task
-            for task in crew.tasks
-            if task.name not in ["Searching files", "Reading content"]
-        ]
     try:
         crew.train(n_iterations=iterations, inputs=inputs, filename=str(filename))
 

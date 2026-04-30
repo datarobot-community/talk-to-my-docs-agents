@@ -16,7 +16,11 @@ Core document processor module. This is where we convert, extract, and store met
 for passing around to LLMs and agents.
 """
 
-from .constants import SUPPORTED_FILE_TYPES, SUPPORTED_MIME_TYPES
+from .constants import (
+    EMBEDDED_DOCUMENTS_PHRASE,
+    SUPPORTED_FILE_TYPES,
+    SUPPORTED_MIME_TYPES,
+)
 from .document_loader import convert_document_to_text
 from .exceptions import (
     DocProcessorError,
@@ -26,6 +30,7 @@ from .exceptions import (
 from .image_loader import convert_document_pages_to_images
 
 __all__ = [
+    "EMBEDDED_DOCUMENTS_PHRASE",
     "SUPPORTED_FILE_TYPES",
     "SUPPORTED_MIME_TYPES",
     "convert_document_to_text",

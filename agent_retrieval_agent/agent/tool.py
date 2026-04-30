@@ -114,8 +114,8 @@ class KnowledgeBaseContentTool(BaseTool):
     description: str = (
         "This tool retrieves the full content of knowledge base files by their UUIDs. "
         "To use this tool, provide a list of file UUIDs (strings in the format like "
-        "'44c6434a-7396-4b05-8ff1-bf1ab7f6000a'). You should get these UUIDs from the "
-        "Knowledge Base File Searcher's output. "
+        "'44c6434a-7396-4b05-8ff1-bf1ab7f6000a'). Extract these UUIDs from the 'uuid' key "
+        "in the knowledge base JSON input — never use owner_uuid or project_uuid. "
         "You will receive a dictionary where the keys are the file UUIDs and values are "
         "dictionaries of pages and their associated text. "
         "Example input: ['44c6434a-7396-4b05-8ff1-bf1ab7f6000a', '22b19e27-15b8-4238-98f4-d66571aa0c58']"

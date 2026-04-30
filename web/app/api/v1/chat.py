@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, List,
 
 import datarobot as dr
 import litellm
+from core.document_loader import EMBEDDED_DOCUMENTS_PHRASE
 from datarobot.auth.session import AuthCtx
 from datarobot.auth.typing import Metadata
 from datarobot.core import getenv
@@ -54,6 +55,71 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
 chat_router = APIRouter(tags=["Chat"])
+
+
+def _otel_input_messages(messages: list[Any]) -> str:
+    """Convert OpenAI message format to OTel gen_ai.input.messages spec format."""
+    result = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role", "unknown")
+        parts: list[dict[str, Any]] = []
+
+        content = msg.get("content")
+        tool_call_id = msg.get("tool_call_id")
+
+        if tool_call_id:
+            parts.append(
+                {
+                    "type": "tool_call_response",
+                    "id": tool_call_id,
+                    "result": content
+                    if isinstance(content, str)
+                    else json.dumps(content, default=str),
+                }
+            )
+        elif isinstance(content, str) and content:
+            parts.append({"type": "text", "content": content})
+        elif isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    parts.append({"type": "text", "content": item.get("text", "")})
+                else:
+                    parts.append(item)
+
+        for tc in msg.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") or {}
+            raw_args = fn.get("arguments", {})
+            try:
+                arguments = (
+                    json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                )
+            except (json.JSONDecodeError, TypeError):
+                arguments = raw_args
+            parts.append(
+                {
+                    "type": "tool_call",
+                    "id": tc.get("id", ""),
+                    "name": fn.get("name", ""),
+                    "arguments": arguments,
+                }
+            )
+
+        result.append({"role": role, "parts": parts})
+    return json.dumps(result, default=str)
+
+
+def _otel_output_messages(content: str) -> str:
+    """Convert a completion string to OTel gen_ai.output.messages spec format."""
+    return json.dumps(
+        [{"role": "assistant", "parts": [{"type": "text", "content": content}]}]
+    )
+
 
 DATAROBOT_IDENTITY_HEADER_NAME = "X-DataRobot-Identity-Token"
 
@@ -275,8 +341,8 @@ async def _augment_message_with_files(
         )
 
     documents_intro = (
-        "Here are the relevant documents with each document separated by three dashes, "
-        "and each page numbered with 'Page <num>: <content>':"
+        EMBEDDED_DOCUMENTS_PHRASE
+        + ", and each page numbered with 'Page <num>: <content>':"
     )
 
     return f"{message}\n\n{documents_intro}\n\n" + "\n---\n".join(file_content)
@@ -549,10 +615,11 @@ async def _send_chat_completion(
             f"{config.datarobot_endpoint.rstrip('/')}/genai/llmgw/chat/completions"
         )
 
+    provider = model.split("/")[0] if "/" in model else model
     with _tracer.start_as_current_span(f"gen_ai.chat {model}") as span:
-        span.set_attribute("gen_ai.prompt", json.dumps(messages))
+        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
         span.set_attribute("gen_ai.request.model", model)
-        span.set_attribute("gen_ai.system", "datarobot")
+        span.set_attribute("gen_ai.provider.name", provider)
         completion = await litellm.acompletion(
             messages=messages,
             model=_normalize_model_id(model),
@@ -561,7 +628,9 @@ async def _send_chat_completion(
         )
         # Extract message content from LiteLLM response
         llm_message_content = completion["choices"][0]["message"]["content"] or ""
-        span.set_attribute("gen_ai.completion", llm_message_content)
+        span.set_attribute(
+            "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+        )
         if hasattr(completion, "usage") and completion.usage:
             if completion.usage.prompt_tokens:
                 span.set_attribute(
@@ -687,10 +756,11 @@ async def _send_chat_agent_completion(
     message_obj = await message_repo.get_message(message_uuid)
     chat_id = message_obj.chat_id if message_obj else None
 
+    agent_provider = llm_model.split("/")[0] if "/" in llm_model else llm_model
     with _tracer.start_as_current_span(f"gen_ai.agent {llm_model}") as span:
-        span.set_attribute("gen_ai.prompt", json.dumps(messages))
+        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
         span.set_attribute("gen_ai.request.model", llm_model)
-        span.set_attribute("gen_ai.system", "datarobot")
+        span.set_attribute("gen_ai.provider.name", agent_provider)
         processor = TaskProgressProcessor()
 
         async for chunk in await litellm.acompletion(
@@ -728,7 +798,9 @@ async def _send_chat_agent_completion(
                         )
 
         llm_message_content = processor.flush()
-        span.set_attribute("gen_ai.completion", llm_message_content)
+        span.set_attribute(
+            "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+        )
 
     update_model = MessageUpdate(
         content=llm_message_content,

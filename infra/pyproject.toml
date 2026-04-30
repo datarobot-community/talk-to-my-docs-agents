@@ -10,7 +10,7 @@ dependencies = [
     "datarobot>=3.8.2",
     "datarobot-pulumi-utils>=0.1.5",
     "langgraph-checkpoint>=3.0.0",
-    "litellm>=1.72.1,<2.0.0,!=1.82.7,!=1.82.8",
+    "litellm>=1.83.0,<2.0.0",  # CVE-2026-35030, CVE-2026-35029, GHSA-69x8-hrgq-fjj8
     "pulumi>=3.175.0",
     "pulumi-datarobot>=0.10.27",
     "pulumi-command>=1.1.3",
@@ -18,8 +18,11 @@ dependencies = [
     "ipdb>=0.13.13",
     "rpdb>=0.2.0",
     "urllib3>=2.6.3",
-    "langchain-core>=1.2.5,<2.0.0",
+    "langchain-core>=1.2.22,<2.0.0",  # CVE-2026-34070
     "aiohttp>=3.13.3",
+    "orjson>=3.11.6",  # CVE-2025-67221
+    "tornado>=6.5.5",  # CVE-2026-31958, CVE-2026-35536
+    "protobuf>=5.29.6",  # CVE-2026-0994
 ]
 
 [project.optional-dependencies]

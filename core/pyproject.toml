@@ -14,12 +14,14 @@ dependencies = [
     "fsspec==2025.3.0",  # forced into slightly older version from datarobot[genai] transitive dependencies
     "openai>=1.59.9,<2",
     "pdf2image>=1.17.0",
-    "pillow>=11.2.1",
+    "pillow>=12.2.0",  # CVE-2026-25990, CVE-2026-40192
     "pymupdf>=1.25.5",
     "python-docx>=1.1.2",
     "python-pptx>=1.0.2",
-    "authlib>=1.6.5",
-    "urllib3>=2.6.0",
+    "authlib>=1.6.9",  # CVE-2026-27962, CVE-2026-28490, CVE-2026-28498, CVE-2026-28802
+    "urllib3>=2.6.3",  # CVE-2026-21441
+    "cryptography>=46.0.5",  # CVE-2026-26007
+    "lxml>=6.1.0",  # CVE-2026-41066
 ]
 
 [build-system]

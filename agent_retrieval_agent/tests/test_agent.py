@@ -267,7 +267,6 @@ class TestMyAgentCrewAI:
 
     @patch("agent.myagent.Agent")
     def test_agent_file_searcher_property(self, mock_agent, agent):
-        # Mock the llm property
         mock_llm = Mock()
         with patch.object(MyAgent, "llm", return_value=mock_llm):
             agent.agent_file_searcher
@@ -278,57 +277,65 @@ class TestMyAgentCrewAI:
                 allow_delegation=False,
                 verbose=True,
                 max_iter=3,
+                tools=ANY,
                 llm=ANY,
             )
 
     @patch("agent.myagent.Agent")
-    def test_finalizer_agent_property(self, mock_agent, agent):
-        # Mock the llm property
+    def test_document_in_question_agent_property(self, mock_agent, agent):
         mock_llm = Mock()
         with patch.object(MyAgent, "llm", return_value=mock_llm):
-            agent.finalizer_agent
+            agent.document_in_question_agent
             mock_agent.assert_called_once_with(
-                role="Finalizer Agent",
+                role="Document Agent",
                 goal=ANY,
                 backstory=ANY,
-                max_iter=5,
                 allow_delegation=False,
                 verbose=True,
+                max_iter=5,
+                tools=ANY,
+                llm=ANY,
+            )
+
+    @patch("agent.myagent.Agent")
+    def test_knowledge_base_agent_property(self, mock_agent, agent):
+        mock_llm = Mock()
+        with patch.object(MyAgent, "llm", return_value=mock_llm):
+            agent.knowledge_base_agent
+            mock_agent.assert_called_once_with(
+                role="Knowledge Base Agent",
+                goal=ANY,
+                backstory=ANY,
+                allow_delegation=False,
+                verbose=True,
+                max_iter=5,
+                tools=ANY,
+                llm=ANY,
+            )
+
+    @patch("agent.myagent.Agent")
+    def test_manager_agent_property(self, mock_agent, agent):
+        mock_llm = Mock()
+        with patch.object(MyAgent, "llm", return_value=mock_llm):
+            agent.manager_agent
+            mock_agent.assert_called_once_with(
+                role=ANY,
+                goal=ANY,
+                backstory=ANY,
+                allow_delegation=True,
+                verbose=True,
+                max_iter=5,
                 llm=ANY,
             )
 
     @patch("agent.myagent.Task")
-    def test_task_file_search_property(self, mock_task, agent):
-        # Mock the agent_file_searcher property
-        mock_file_searcher = Mock()
-        with patch.object(
-            MyAgent, "agent_file_searcher", return_value=mock_file_searcher
-        ):
-            agent.task_file_search
-            mock_task.assert_called_once_with(
-                name=ANY,
-                description=ANY,
-                expected_output=ANY,
-                output_pydantic=ANY,
-                agent=ANY,
-                tools=ANY,
-            )
-
-    @patch("agent.myagent.Task")
-    def test_task_write_property(self, mock_task, agent):
-        # Mock the agent_file_searcher property
-        mock_file_searcher = Mock()
-        with patch.object(
-            MyAgent, "agent_file_searcher", return_value=mock_file_searcher
-        ):
-            agent.task_write
-            mock_task.assert_called_once_with(
-                name=ANY,
-                description=ANY,
-                expected_output=ANY,
-                agent=ANY,
-                tools=ANY,
-            )
+    def test_task_answer_question_property(self, mock_task, agent):
+        agent.task_answer_question
+        mock_task.assert_called_once_with(
+            name="Delegating question",
+            description=ANY,
+            expected_output=ANY,
+        )
 
     @patch("agent.myagent.Crew")
     @patch("agent.myagent.CrewAIRagasEventListener")

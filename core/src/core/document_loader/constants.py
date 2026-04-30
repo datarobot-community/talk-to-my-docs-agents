@@ -29,3 +29,9 @@ DEFAULT_MAX_WORKERS = 8
 # Default to lower DPI for better performance
 DEFAULT_DPI = 72
 DEFAULT_JPEG_QUALITY = 60
+
+# Prefix injected by web/app/api/v1/chat.py when a user attaches files to a message.
+# Used by the agent to detect embedded document content in the prompt.
+EMBEDDED_DOCUMENTS_PHRASE = (
+    "Here are the relevant documents with each document separated by three dashes"
+)
