@@ -55,7 +55,7 @@ jobs:
         run: task test
 
       - name: Get Cover
-        uses: orgoro/coverage@v3.2
+        uses: orgoro/coverage@v3.3
         with:
           coverageFile: core/.coverage.xml
           token: ${{ secrets.GITHUB_TOKEN }}

@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [11.7.3] - 2026-05-11
+
+### Added
+
+- Improved OTEL coverage: LiteLLM calls are now traced and trace context is propagated to downstream LLM requests.
+
+### Changed
+
+- Updated retrieval agent default model to `anthropic/claude-sonnet-4-5-20250929`.
+- Renamed sample documents folder from `sample_documents/` to `static_docs/`.
+
+
+## [11.7.2] - 2026-04-30
+
+### Added
+
+- Simplified local tracing setup with a new `scripts/create_tracing_shell.sh` helper script.
+
+### Changed
+
+- Switched retrieval agent to hierarchical crew process with a dedicated Manager Agent to significantly speed up the app.
+- Updated OTEL span attribute names to align with GenAI semantic conventions.
+
+### Fixed
+
+- Fixed span aggregation for chat completions.
+
+### Security
+
+- Bumped dependencies to address security vulnerabilities.
+
+
 ## [11.7.1] - 2026-04-20
 
 ### Security

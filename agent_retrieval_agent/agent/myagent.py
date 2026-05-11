@@ -250,7 +250,7 @@ class MyAgent(CrewAIAgent):
             tools=[self.file_list_tool, self.document_read_tool]
             + list(self.tools or []),
             llm=self.llm(
-                preferred_model="datarobot/bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+                preferred_model="datarobot/anthropic/claude-sonnet-4-5-20250929",
             ),
         )
 
@@ -336,7 +336,7 @@ class MyAgent(CrewAIAgent):
             allow_delegation=True,
             verbose=self.verbose,
             llm=self.llm(
-                preferred_model="datarobot/bedrock/anthropic.claude-sonnet-4-20250514-v1:0"
+                preferred_model="datarobot/anthropic/claude-sonnet-4-5-20250929"
             ),
         )
 

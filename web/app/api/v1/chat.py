@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
+import functools
 import json
 import logging
 import re
 import uuid as uuidpkg
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, List, Tuple
+from urllib.parse import urlparse
 
 import datarobot as dr
 import litellm
@@ -27,7 +29,7 @@ from datarobot.auth.typing import Metadata
 from datarobot.core import getenv
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from opentelemetry import trace
+from opentelemetry import metrics, propagate, trace
 from sqlalchemy.exc import NoResultFound
 
 from app.api.v1.knowledge_bases import (
@@ -46,6 +48,7 @@ from app.streams import (
     TaskProgressEvent,
     encode_sse_event,
 )
+from app.telemetry.otel import otel
 
 if TYPE_CHECKING:
     from app.files.models import File, FileRepository
@@ -55,6 +58,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
 chat_router = APIRouter(tags=["Chat"])
+
+
+@functools.cache
+def _token_counter() -> metrics.Counter:
+    return otel.get_meter("gen_ai").create_counter(
+        "gen_ai.client.token.usage",
+        unit="{token}",
+        description="Number of tokens used in GenAI API calls",
+    )
 
 
 def _otel_input_messages(messages: list[Any]) -> str:
@@ -532,10 +544,13 @@ def _get_safe_completion_task(
 
 
 def get_extra_headers(request: Request) -> dict[str, str]:
-    extra_headers = {}
+    extra_headers: dict[str, str] = {}
 
     if identity_token := request.headers.get(DATAROBOT_IDENTITY_HEADER_NAME):
         extra_headers[DATAROBOT_IDENTITY_HEADER_NAME] = identity_token
+
+    # Propagate W3C trace context to downstream chat/completions calls.
+    propagate.inject(extra_headers)
 
     return extra_headers
 
@@ -580,6 +595,8 @@ async def _send_chat_completion(
     combined_files = files + knowledge_base_files
 
     message_repo: MessageRepository = request.app.state.deps.message_repo
+    message_obj = await message_repo.get_message(message_uuid)
+    chat_id = message_obj.chat_id if message_obj else None
 
     # Determine system prompt and message based on request type
     system_prompt = (
@@ -616,10 +633,21 @@ async def _send_chat_completion(
         )
 
     provider = model.split("/")[0] if "/" in model else model
+    logger.info(
+        "LLM chat started",
+        extra={"model": model, "turn_id": str(message_uuid), "chat_id": str(chat_id)},
+    )
     with _tracer.start_as_current_span(f"gen_ai.chat {model}") as span:
-        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+        span.set_attribute("gen_ai.operation.name", "chat")
         span.set_attribute("gen_ai.request.model", model)
         span.set_attribute("gen_ai.provider.name", provider)
+        span.set_attribute("server.address", urlparse(api_base).hostname or api_base)
+        span.set_attribute("gen_ai.prompt", message)
+        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+        span.set_attribute("datarobot.turn_id", str(message_uuid))
+        span.set_attribute("datarobot.user_id", str(auth_ctx.user.id))
+        if chat_id:
+            span.set_attribute("gen_ai.conversation.id", str(chat_id))
         completion = await litellm.acompletion(
             messages=messages,
             model=_normalize_model_id(model),
@@ -628,18 +656,33 @@ async def _send_chat_completion(
         )
         # Extract message content from LiteLLM response
         llm_message_content = completion["choices"][0]["message"]["content"] or ""
+        span.set_attribute("gen_ai.completion", llm_message_content)
         span.set_attribute(
             "gen_ai.output.messages", _otel_output_messages(llm_message_content)
         )
         if hasattr(completion, "usage") and completion.usage:
-            if completion.usage.prompt_tokens:
-                span.set_attribute(
-                    "gen_ai.usage.input_tokens", completion.usage.prompt_tokens
+            token_attrs = {
+                "gen_ai.request.model": model,
+                "gen_ai.provider.name": provider,
+            }
+            prompt_tokens = getattr(completion.usage, "prompt_tokens", None)
+            if prompt_tokens is not None:
+                span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
+                _token_counter().add(
+                    prompt_tokens,
+                    {**token_attrs, "gen_ai.token.type": "input"},
                 )
-            if completion.usage.completion_tokens:
-                span.set_attribute(
-                    "gen_ai.usage.output_tokens", completion.usage.completion_tokens
+            completion_tokens = getattr(completion.usage, "completion_tokens", None)
+            if completion_tokens is not None:
+                span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
+                _token_counter().add(
+                    completion_tokens,
+                    {**token_attrs, "gen_ai.token.type": "output"},
                 )
+    logger.info(
+        "LLM chat completed",
+        extra={"model": model, "turn_id": str(message_uuid)},
+    )
     update_model = MessageUpdate(content=llm_message_content, in_progress=False)
     updated_message = await message_repo.update_message(
         uuid=message_uuid,
@@ -757,10 +800,28 @@ async def _send_chat_agent_completion(
     chat_id = message_obj.chat_id if message_obj else None
 
     agent_provider = llm_model.split("/")[0] if "/" in llm_model else llm_model
+    agent_api_base = str(agent_kwargs.get("api_base", ""))
+    logger.info(
+        "Agent chat started",
+        extra={
+            "model": llm_model,
+            "turn_id": str(message_uuid),
+            "chat_id": str(chat_id),
+        },
+    )
     with _tracer.start_as_current_span(f"gen_ai.agent {llm_model}") as span:
-        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+        span.set_attribute("gen_ai.operation.name", "chat")
         span.set_attribute("gen_ai.request.model", llm_model)
         span.set_attribute("gen_ai.provider.name", agent_provider)
+        span.set_attribute(
+            "server.address", urlparse(agent_api_base).hostname or agent_api_base
+        )
+        span.set_attribute("gen_ai.prompt", request_data.get("message", ""))
+        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+        span.set_attribute("datarobot.turn_id", str(message_uuid))
+        span.set_attribute("datarobot.user_id", str(auth_ctx.user.id))
+        if chat_id:
+            span.set_attribute("gen_ai.conversation.id", str(chat_id))
         processor = TaskProgressProcessor()
 
         async for chunk in await litellm.acompletion(
@@ -798,10 +859,15 @@ async def _send_chat_agent_completion(
                         )
 
         llm_message_content = processor.flush()
+        span.set_attribute("gen_ai.completion", llm_message_content)
         span.set_attribute(
             "gen_ai.output.messages", _otel_output_messages(llm_message_content)
         )
 
+    logger.info(
+        "Agent chat completed",
+        extra={"model": llm_model, "turn_id": str(message_uuid)},
+    )
     update_model = MessageUpdate(
         content=llm_message_content,
         in_progress=False,

@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from agent.core.document_loader import document_loader
 
-sample_documents_path = Path(__file__).parent / "sample_documents"
+static_docs_path = Path(__file__).parent / "static_docs"
 
 _TOOL_RESULT_MAX_CHARS = 500
 
@@ -47,7 +47,12 @@ class FileListTool(BaseTool):
         super().__init__(**kwargs)
 
     def _run(self) -> List[str]:
-        files = [str(f) for f in sample_documents_path.glob("**/*") if f.is_file()]
+        _root_readme = static_docs_path / "README.md"
+        files = [
+            str(f)
+            for f in static_docs_path.glob("**/*")
+            if f.is_file() and f != _root_readme
+        ]
         if not files:
             raise ValueError(
                 "No files found in the folder. Please verify that you have access to datasets "

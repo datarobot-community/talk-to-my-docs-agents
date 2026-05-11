@@ -676,6 +676,12 @@ Additionally, the Pulumi output variables are used to populate those providers f
 - Add or modify frontend components in `frontend_web/`
 - Update infrastructure in `infra/`
 
+### Static document fallback
+
+When no knowledge base or uploaded files are available, the agent falls back to documents placed in `agent_retrieval_agent/agent/static_docs/`. Drop any files you want the agent to always have access to in that directory — PDFs, DOCX, Markdown, and more are supported.
+
+See [`agent_retrieval_agent/agent/static_docs/README.md`](agent_retrieval_agent/agent/static_docs/README.md) for details.
+
 ## Additional resources
 
 - [Taskfile.dev Documentation](https://taskfile.dev/#/)

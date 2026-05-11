@@ -18,7 +18,7 @@ from core.document_loader import convert_document_to_text
 
 
 def test_convert_markdown_to_text(shared_datadir: Path) -> None:
-    doc = shared_datadir / "sample_documents" / "developer" / "sample_yaml_spec.md"
+    doc = shared_datadir / "static_docs" / "sample_yaml_spec.md"
     text = convert_document_to_text(str(doc))
     assert "The presence of this file presumes your repository" in text[1]
 
@@ -33,7 +33,7 @@ def test_convert_markdown_to_text(shared_datadir: Path) -> None:
 def test_convert_spec_to_text(
     shared_datadir: Path, doc_name: str, first_page: int, second_page: int
 ) -> None:
-    doc = shared_datadir / "sample_documents" / "developer" / doc_name
+    doc = shared_datadir / "static_docs" / doc_name
     text = convert_document_to_text(str(doc))
     assert "large amounts of feedback from users" in text[first_page]
     assert "This would involve having the nginx" in text[second_page]
