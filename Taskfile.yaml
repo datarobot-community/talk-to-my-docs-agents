@@ -21,6 +21,7 @@ includes:
   execution_environments:
     taskfile: ./execution_environments/Taskfile.yaml
     dir: ./execution_environments
+    optional: true
   frontend_web:
     taskfile: ./frontend_web/Taskfile.yaml
     dir: ./frontend_web

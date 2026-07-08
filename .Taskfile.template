@@ -14,6 +14,9 @@ includes:
   {{ .Name }}:
     taskfile: {{ .Taskfile }}
     dir: {{ .Dir }}
+  {{- if eq .Name "execution_environments" }}
+    optional: true
+  {{- end }}
   {{- end }}
   {{- end }}
 
