@@ -28,6 +28,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api import router as api_router
 from app.config import Config
 from app.deps import Deps, create_deps
+from app.profiling import PyInstrumentMiddleware
 from app.streams import ChatStreamManager
 from app.telemetry import configure_uvicorn_logging, init_logging, otel
 
@@ -108,6 +109,8 @@ def create_app(
     """
     if config is None:
         config = Config()
+
+    otel.configure(config)
     init_logging(level=config.log_level, format_type=config.log_format)
 
     # Configure uvicorn logging with health check filtering and custom formatting
@@ -155,6 +158,9 @@ def create_app(
         https_only=config.session_https_only,
         path=cookie_path,
     )
+
+    if config.profiling_enabled:
+        app.add_middleware(PyInstrumentMiddleware)
 
     app.include_router(base_router)
     app.include_router(api_router)

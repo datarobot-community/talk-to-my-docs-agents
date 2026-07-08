@@ -171,7 +171,7 @@ class UserRepository:
 
         async with self._db.session(writable=True) as session:
             session.add(user)
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(user)
 
         return user
@@ -209,7 +209,7 @@ class UserRepository:
                 user.language = language
 
             session.add(user)
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(user)
 
         return user

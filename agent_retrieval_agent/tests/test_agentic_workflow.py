@@ -91,6 +91,39 @@ class TestCustomModel:
                     "id": ANY,
                     "model": "test-model",
                     "object": "chat.completion.chunk",
+                    "moderation": None,
+                    "pipeline_interactions": None,
+                    "service_tier": None,
+                    "system_fingerprint": None,
+                    "usage": {
+                        "completion_tokens": 1,
+                        "completion_tokens_details": None,
+                        "prompt_tokens": 2,
+                        "prompt_tokens_details": None,
+                        "total_tokens": 3,
+                    },
+                },
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "",
+                                "function_call": None,
+                                "refusal": None,
+                                "role": "assistant",
+                                "tool_calls": None,
+                            },
+                            "finish_reason": None,
+                            "index": 0,
+                            "logprobs": None,
+                        },
+                    ],
+                    "created": ANY,
+                    "event": ANY,
+                    "id": ANY,
+                    "model": "test-model",
+                    "object": "chat.completion.chunk",
+                    "moderation": None,
                     "pipeline_interactions": None,
                     "service_tier": None,
                     "system_fingerprint": None,
@@ -122,6 +155,7 @@ class TestCustomModel:
                     "id": ANY,
                     "model": "test-model",
                     "object": "chat.completion.chunk",
+                    "moderation": None,
                     "pipeline_interactions": ANY,
                     "service_tier": None,
                     "system_fingerprint": None,
@@ -169,15 +203,17 @@ class TestCustomModel:
                     "prompt_tokens_details": None,
                 },
                 "pipeline_interactions": ANY,
+                "moderation": None,
             }
             assert actual == expected
 
-        # Verify mocks were called correctly
+        # Verify mocks were called correctly. MCP tools are injected by
+        # agent_chat_completion_wrapper via set_tools(), not the constructor, so
+        # `tools` is not passed here.
         mock_agent.assert_called_once_with(
             forwarded_headers=kwargs["headers"],
             verbose=True,
             timeout=300,
-            tools=[],
         )
         assert mock_agent_instance.invoke.called
         assert mock_agent_instance.invoke.call_args[0][0].messages == [
@@ -265,8 +301,9 @@ class TestCustomModel:
         # Collect all chunks
         chunks = list(response)
 
-        # Should have 3 chunks (2 with content + 1 final)
-        assert len(chunks) == 3
+        # Should have 4 chunks: 2 with content, an empty chunk emitted for the
+        # RUN_FINISHED event, and 1 final stop chunk.
+        assert len(chunks) == 4
 
         # First chunk with content
         chunk1 = json.loads(chunks[0].model_dump_json())
@@ -280,19 +317,24 @@ class TestCustomModel:
         assert chunk2["choices"][0]["delta"]["content"] == "chunk2"
         assert chunk2["choices"][0]["finish_reason"] is None
 
+        # Empty chunk emitted for the RUN_FINISHED event
+        run_finished_chunk = json.loads(chunks[2].model_dump_json())
+        assert run_finished_chunk["choices"][0]["delta"]["content"] == ""
+        assert run_finished_chunk["choices"][0]["finish_reason"] is None
+
         # Final chunk
-        final_chunk = json.loads(chunks[2].model_dump_json())
+        final_chunk = json.loads(chunks[3].model_dump_json())
         assert final_chunk["choices"][0]["delta"]["content"] is None
         assert final_chunk["choices"][0]["finish_reason"] == "stop"
         assert final_chunk["pipeline_interactions"] == "interactions"
         assert final_chunk["usage"]["total_tokens"] == 5
 
-        # Verify mocks were called correctly
+        # Verify mocks were called correctly. MCP tools are injected by
+        # agent_chat_completion_wrapper via set_tools(), not the constructor.
         mock_agent.assert_called_once_with(
             forwarded_headers=kwargs["headers"],
             verbose=True,
             timeout=300,
-            tools=[],
         )
         assert mock_agent_instance.invoke.called
         assert mock_agent_instance.invoke.call_args[0][0].messages == [

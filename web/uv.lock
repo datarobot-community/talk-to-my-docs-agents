@@ -468,7 +468,7 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "authlib" },
     { name = "cryptography" },
-    { name = "datarobot", extra = ["auth-authlib", "core"] },
+    { name = "datarobot", extra = ["auth-authlib", "core", "fs"] },
     { name = "duckdb" },
     { name = "fsspec" },
     { name = "lxml" },
@@ -486,9 +486,9 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.21.0,<0.22" },
     { name = "authlib", specifier = ">=1.6.9" },
     { name = "cryptography", specifier = ">=46.0.5" },
-    { name = "datarobot", extras = ["auth-authlib", "core"], specifier = ">=3.9.1" },
+    { name = "datarobot", extras = ["auth-authlib", "core", "fs"], specifier = ">=3.16.0" },
     { name = "duckdb", specifier = ">=1.3.1,<1.4" },
-    { name = "fsspec", specifier = "==2025.3.0" },
+    { name = "fsspec", specifier = ">=2025.5,<2025.6" },
     { name = "lxml", specifier = ">=6.1.0" },
     { name = "openai", specifier = ">=1.59.9,<2" },
     { name = "pdf2image", specifier = ">=1.17.0" },
@@ -624,7 +624,7 @@ wheels = [
 
 [[package]]
 name = "datarobot"
-version = "3.13.0"
+version = "3.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -640,9 +640,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/31/28/6794448d1f853ceae0d9f4f9756fe357c095574c6234275caf199533ffc0/datarobot-3.13.0.tar.gz", hash = "sha256:469468636e525f4671fa361d7a743e5ab62e1dbb21889c2a338163cf5d018310", size = 767425, upload-time = "2026-03-10T17:53:21.877Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/2f/41c103556138f6014fb70ea83edea6ae08942fc84aea9ac0146fc76c724d/datarobot-3.16.0.tar.gz", hash = "sha256:77711633b303966acf54d80eb9ba6f1350850ff0493f14c1a4a391ca85fd7aa0", size = 817184, upload-time = "2026-05-27T13:10:11.896Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/b6/a68133d3a62887b232c9002b3c2366b9176305c44a2006a89358f6d94fd8/datarobot-3.13.0-py3-none-any.whl", hash = "sha256:00543ce0d073f7d9bccea8e44a621f766512d3819988278b1d77ca63ff563191", size = 830964, upload-time = "2026-03-10T17:53:19.541Z" },
+    { url = "https://files.pythonhosted.org/packages/48/6a/c180f242725be2808890d92f419dea621d6fdca44ddfb319ed4213fd4b6b/datarobot-3.16.0-py3-none-any.whl", hash = "sha256:52c1fa2dedae96d2717de2d583c3b9bd867f333b3ad82903daeadb219767e3e7", size = 883064, upload-time = "2026-05-27T13:10:09.886Z" },
 ]
 
 [package.optional-dependencies]
@@ -655,6 +655,9 @@ core = [
     { name = "psutil" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+]
+fs = [
+    { name = "fsspec" },
 ]
 
 [[package]]
@@ -980,11 +983,11 @@ wheels = [
 
 [[package]]
 name = "fsspec"
-version = "2025.3.0"
+version = "2025.5.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/34/f4/5721faf47b8c499e776bc34c6a8fc17efdf7fdef0b00f398128bc5dcb4ac/fsspec-2025.3.0.tar.gz", hash = "sha256:a935fd1ea872591f2b5148907d103488fc523295e6c64b835cfad8c3eca44972", size = 298491, upload-time = "2025-03-07T21:47:56.461Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/f7/27f15d41f0ed38e8fcc488584b57e902b331da7f7c6dcda53721b15838fc/fsspec-2025.5.1.tar.gz", hash = "sha256:2e55e47a540b91843b755e83ded97c6e897fa0942b11490113f09e9c443c2475", size = 303033, upload-time = "2025-05-24T12:03:23.792Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/53/eb690efa8513166adef3e0669afd31e95ffde69fb3c52ec2ac7223ed6018/fsspec-2025.3.0-py3-none-any.whl", hash = "sha256:efb87af3efa9103f94ca91a7f8cb7a4df91af9f74fc106c9c7ea0efd7277c1b3", size = 193615, upload-time = "2025-03-07T21:47:54.809Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/61/78c7b3851add1481b048b5fdc29067397a1784e2910592bc81bb3f608635/fsspec-2025.5.1-py3-none-any.whl", hash = "sha256:24d3a2e663d5fc735ab256263c4075f374a174c3410c0b25e5bd1970bceaa462", size = 199052, upload-time = "2025-05-24T12:03:21.66Z" },
 ]
 
 [[package]]
@@ -1903,6 +1906,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8d/f8/1917b0b3e414e23c7d71c9a33f0ce020f94bc47d22a30f54ace704e07588/opentelemetry_instrumentation_fastapi-0.50b0.tar.gz", hash = "sha256:16b9181682136da210295def2bb304a32fb9bdee9a935cdc9da43567f7c1149e", size = 19214, upload-time = "2024-12-11T17:05:42.062Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/d6/37784bb30b213e2dd6838b9f96c2940907022c1b75ef1ff18a99afe42433/opentelemetry_instrumentation_fastapi-0.50b0-py3-none-any.whl", hash = "sha256:8f03b738495e4705fbae51a2826389c7369629dace89d0f291c06ffefdff5e52", size = 12079, upload-time = "2024-12-11T17:04:26.15Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-httpx"
+version = "0.50b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d5/9c/4a6b0af28d579690fbab7ffd0560802e4384cd56c8d637f99641f44a7291/opentelemetry_instrumentation_httpx-0.50b0.tar.gz", hash = "sha256:0072d1d39552449c08a45a7a0db0cd6af32c85205bd97267b2a272fc56a9b438", size = 17611, upload-time = "2024-12-11T17:05:44.377Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/25/6a0edd3d161d5a15cf4538e32a1289f1f6fd7a52651afd32bb856ede4e99/opentelemetry_instrumentation_httpx-0.50b0-py3-none-any.whl", hash = "sha256:27acd41a9e70384d0978d58f492e5c16fc7a1b2363d5992b5bd0a27a3df7b68e", size = 13838, upload-time = "2024-12-11T17:04:31.053Z" },
 ]
 
 [[package]]
@@ -3479,6 +3498,7 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-instrumentation" },
     { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-httpx" },
     { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-instrumentation-requests" },
     { name = "opentelemetry-instrumentation-sqlalchemy" },
@@ -3528,6 +3548,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.22.0,<1.30.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.43b0,<0.59b0" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.43b0,<0.59b0" },
+    { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.43b0,<0.59b0" },
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.43b0,<0.59b0" },
     { name = "opentelemetry-instrumentation-requests", specifier = ">=0.43b0,<0.59b0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", specifier = ">=0.43b0,<0.59b0" },

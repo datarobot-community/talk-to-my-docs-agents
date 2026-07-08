@@ -175,7 +175,7 @@ class IdentityRepository:
 
         async with self._db.session(writable=True) as sess:
             sess.add(identity)
-            await sess.commit()
+            await self._db.commit(sess)
             await sess.refresh(identity)
 
         return identity
@@ -291,7 +291,7 @@ class IdentityRepository:
                 sess.add(identity)
                 try:
                     await sess.flush()
-                    await sess.commit()
+                    await self._db.commit(sess)
                     return identity
                 except IntegrityError:
                     await sess.rollback()
@@ -315,7 +315,7 @@ class IdentityRepository:
                 setattr(identity, field, value)
 
             sess.add(identity)
-            await sess.commit()
+            await self._db.commit(sess)
             await sess.refresh(identity)
 
         return identity
@@ -331,7 +331,7 @@ class IdentityRepository:
                 return
 
             await sess.delete(identity)
-            await sess.commit()
+            await self._db.commit(sess)
 
     async def delete_by_user_id(self, user_id: int) -> None:
         """
@@ -346,4 +346,4 @@ class IdentityRepository:
                 for connection in connections:
                     await sess.delete(connection)
 
-                await sess.commit()
+                await self._db.commit(sess)

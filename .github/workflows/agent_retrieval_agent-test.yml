@@ -21,7 +21,7 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: Checkout
-        uses: "actions/checkout@v5"
+        uses: "actions/checkout@v7"
       - name: Install Task
         uses: go-task/setup-task@v2
       - name: Setup uv
@@ -40,7 +40,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: "actions/checkout@v6"
+      - uses: "actions/checkout@v7"
       # Ref: https://docs.astral.sh/uv/guides/integration/github/#installation
       - name: Setup uv
         uses: astral-sh/setup-uv@v7

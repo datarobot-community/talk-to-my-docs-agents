@@ -54,9 +54,7 @@ __all__ = [
 
 llm_application_name: str = "llm"
 llm_resource_name: str = "[llm]"
-default_model: str = os.environ.get(
-    "LLM_DEFAULT_MODEL", "datarobot/azure/gpt-5-mini-2025-08-07"
-)
+default_model: str = os.environ.get("LLM_DEFAULT_MODEL", "azure-openai-gpt-5-mini")
 default_llm_id: str = os.environ.get(
     "LLM_DEFAULT_LLM_ID",
     "azure-openai-gpt-5-mini",  # External LLM ID from the Playground
@@ -161,7 +159,7 @@ app_runtime_parameters = [
         value=default_model,
     ),
     datarobot.ApplicationSourceRuntimeParameterValueArgs(
-        key="LLM_DEFAULT_MODE_FRIENDLY_NAME",
+        key="LLM_DEFAULT_MODEL_FRIENDLY_NAME",
         type="string",
         value=default_llm_friendly_name,
     ),
@@ -178,10 +176,28 @@ custom_model_runtime_parameters = [
         value=default_model,
     ),
 ]
-pulumi.export(
-    f"Deployment ID Talk to My Docs Blueprint Deployment [{PROJECT_NAME}]",
+
+# TODO(APP-5859): Move datarobot_url to af-component-base infra/__init__.py
+datarobot_url = (
+    os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2")
+    .rstrip("/")
+    .removesuffix("/api/v2")
+)
+rag_playground_url = pulumi.Output.format(
+    "{0}/usecases/{1}/playgrounds/{2}/comparison/chats",
+    datarobot_url,
+    use_case.id,
+    playground.id,
+)
+deployment_url = pulumi.Output.format(
+    "{0}/console-nextgen/deployments/{1}/overview",
+    datarobot_url,
     llm_deployment.id,
 )
+
+pulumi.export("Deployment ID " + llm_resource_name, llm_deployment.id)
+pulumi.export("Deployment Console " + llm_resource_name, deployment_url)
 export("LLM_DEPLOYMENT_ID", llm_deployment.id)
 export("LLM_DEFAULT_MODEL", default_model)
 export("LLM_DEFAULT_MODEL_FRIENDLY_NAME", default_llm_friendly_name)
+pulumi.export("RAG Playground URL " + llm_resource_name, rag_playground_url)

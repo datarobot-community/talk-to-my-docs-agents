@@ -12,14 +12,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
 import os
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
+from crewai.types.streaming import CrewStreamingOutput, StreamChunk, StreamChunkType
 from ragas.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 
 from agent import MyAgent
+
+
+def _streaming_output(chunks, result):
+    """Build a CrewStreamingOutput that async-yields ``chunks`` then exposes ``result``.
+
+    Mirrors crewai 1.11: ``crew.akickoff(stream=True)`` returns a
+    ``CrewStreamingOutput`` whose async iterator drives execution and whose
+    ``.result`` is the final ``CrewOutput`` once iteration completes.
+    """
+
+    async def _aiter():
+        for chunk in chunks:
+            yield chunk
+
+    out = CrewStreamingOutput(async_iterator=_aiter())
+    out._set_result(result)
+    return out
+
+
+def _text_chunk(content, agent_role):
+    return StreamChunk(
+        content=content,
+        chunk_type=StreamChunkType.TEXT,
+        agent_role=agent_role,
+    )
 
 
 class TestMyAgentCrewAI:
@@ -339,12 +366,14 @@ class TestMyAgentCrewAI:
 
     @patch("agent.myagent.Crew")
     @patch("agent.myagent.CrewAIRagasEventListener")
+    @patch("agent.myagent.trace.get_current_span")
     @patch("agent.myagent.Task")
     @patch("agent.myagent.Agent")
     def test_chat(
         self,
         mock_agent,
         mock_task,
+        mock_get_current_span,
         mock_event_listener,
         mock_crew,
         agent,
@@ -363,7 +392,17 @@ class TestMyAgentCrewAI:
                 total_tokens=3,
             ),
         )
-        mock_crew.return_value = Mock(kickoff_async=AsyncMock(return_value=crew_output))
+        # invoke() runs the crew with stream=True via akickoff (-> CrewStreamingOutput),
+        # async-iterates the manager's streamed answer (gated on "Final Answer:"), and
+        # reads usage/.raw from streaming_output.result.
+        streaming_output = _streaming_output(
+            [_text_chunk("Final Answer: agent result", "Manager Agent")],
+            crew_output,
+        )
+        mock_crew.return_value = Mock(akickoff=AsyncMock(return_value=streaming_output))
+        mock_span = Mock()
+        mock_span.is_recording.return_value = True
+        mock_get_current_span.return_value = mock_span
 
         events = [
             HumanMessage(content="Hi"),
@@ -394,3 +433,56 @@ class TestMyAgentCrewAI:
         for expected_message, actual_message in zip(events, actual_events):
             assert expected_message.content == actual_message["content"]
             assert expected_message.type == actual_message["type"]
+
+        mock_span.set_attribute.assert_any_call("gen_ai.usage.input_tokens", 2)
+        mock_span.set_attribute.assert_any_call("gen_ai.usage.output_tokens", 1)
+
+    @patch("agent.myagent.Crew")
+    @patch("agent.myagent.CrewAIRagasEventListener")
+    @patch("agent.myagent.trace.get_current_span")
+    @patch("agent.myagent.Task")
+    @patch("agent.myagent.Agent")
+    def test_invoke_emits_final_answer(
+        self,
+        mock_agent,
+        mock_task,
+        mock_get_current_span,
+        mock_event_listener,
+        mock_crew,
+        agent,
+    ):
+        """invoke() runs the crew via akickoff and emits the final answer from
+        crew_output.raw as a single AG-UI text chunk, bracketed by
+        RunStarted/RunFinished. Driven on a self-contained event loop (not
+        pytest-asyncio) so it doesn't perturb other tests' current-loop state.
+        """
+        _ = mock_agent, mock_task
+
+        crew_output = Mock(
+            raw="final answer",
+            token_usage=Mock(completion_tokens=1, prompt_tokens=2, total_tokens=3),
+        )
+        mock_crew.return_value = Mock(akickoff=AsyncMock(return_value=crew_output))
+        mock_get_current_span.return_value = Mock(is_recording=Mock(return_value=False))
+        mock_event_listener.return_value = Mock(messages=None)
+
+        user_msg = Mock(role="user")
+        user_msg.content = '{"topic": "docs", "question": "summarize"}'
+        run_input = Mock(thread_id="t", run_id="r", messages=[user_msg])
+
+        async def _collect() -> list:
+            return [event async for event in agent.invoke(run_input)]
+
+        loop = asyncio.new_event_loop()
+        try:
+            events = loop.run_until_complete(_collect())
+        finally:
+            loop.close()
+
+        event_types = [type(event).__name__ for event, _pi, _um in events]
+        assert event_types == [
+            "RunStartedEvent",
+            "TextMessageChunkEvent",
+            "RunFinishedEvent",
+        ]
+        assert events[1][0].delta == "final answer"

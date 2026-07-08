@@ -1,9 +1,10 @@
 # Changes here will be overwritten by Copier
-_commit: 11.8.0
+_commit: 11.10.49
 _src_path: git@github.com:datarobot-community/af-component-agent.git
 agent_app_name: agent_retrieval_agent
 agent_template_framework: crewai
 base_answers_file: .datarobot/answers/base.yml
 llm_answers_file: .datarobot/answers/llm-llm.yml
 mcp_answers_file: .datarobot/answers/drmcp-mcp_server.yml
+use_agent_memory: none
 use_low_code_interface: false

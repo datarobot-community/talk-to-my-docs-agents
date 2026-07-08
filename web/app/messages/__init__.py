@@ -100,7 +100,7 @@ class MessageRepository:
         async with self._db.session(writable=True) as session:
             session.add(message)
             try:
-                await session.commit()
+                await self._db.commit(session)
             except IntegrityError:
                 await session.rollback()
                 raise ValueError(f"Chat with ID {message_data.chat_id} does not exist")
@@ -127,7 +127,7 @@ class MessageRepository:
                 if value is not None:
                     setattr(message, field, value)
 
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(message)
             return message
 

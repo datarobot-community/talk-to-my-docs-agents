@@ -23,6 +23,7 @@ import yaml  # type: ignore[import-untyped]
 import datarobot as dr
 import pulumi
 import pulumi_datarobot
+from datarobot_pulumi_utils.common import get_datarobot_url
 from datarobot_pulumi_utils.pulumi import export, resolve_execution_environment_version
 from datarobot_pulumi_utils.pulumi.custom_model_deployment import CustomModelDeployment
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
@@ -39,10 +40,20 @@ from .llm import custom_model_runtime_parameters as llm_custom_model_runtime_par
 
 DEFAULT_EXECUTION_ENVIRONMENT = "Python 3.11 GenAI Agents"
 
+
+# Whether to use `dragent` as a frontserver for agent
+ENABLE_DRAGENT_SERVER = (
+    os.environ.get("ENABLE_DRAGENT_SERVER", "").strip().lower() == "true"
+)
+
 # Toggle for High Availability (HA) and Load Balancing configuration for agent deployment
 # To enable HA mode: Add ENABLE_AGENT_HA_MODE="true" to your .env file in the project root
-# When enabled: workers=5, replicas=2, max_computes=4
-# When disabled (default): workers=2, replicas=1, max_computes=2
+# For `drum` server (legacy):
+# When enabled: workers=5, resource_bundle=cpu.5xlarge, replicas=2, max_computes=4
+# When disabled (default): workers=2, resource_bundle=cpu.3xlarge, replicas=1, max_computes=2
+# For `dragent` server:
+# When enabled: workers=5, resource_bundle=cpu.3xlarge, replicas=2, max_computes=4
+# When disabled (default): workers=2, resource_bundle=cpu.xlarge, replicas=1, max_computes=2
 ENABLE_AGENT_HA_MODE = os.environ.get("ENABLE_AGENT_HA_MODE", "false").lower() == "true"
 
 # Custom Model DRUM runtime parameters (concurrency configuration)
@@ -50,7 +61,22 @@ DEFAULT_CUSTOM_MODEL_WORKERS: Final[str] = "5" if ENABLE_AGENT_HA_MODE else "2"
 DEFAULT_DRUM_SERVER_TYPE: Final[str] = "gunicorn"
 DEFAULT_DRUM_GUNICORN_WORKER_CLASS: Final[str] = "sync"
 DEFAULT_DRUM_WORKER_CONNECTIONS: Final[str] = "1"
-DEFAULT_DRUM_CLIENT_REQUEST_TIMEOUT: Final[str] = "600"
+# Custom Model resource bundle configuration
+if ENABLE_DRAGENT_SERVER:
+    DEFAULT_AGENT_RESOURCE_BUNDLE_ID: str = (
+        "cpu.3xlarge" if ENABLE_AGENT_HA_MODE else "cpu.xlarge"
+    )
+else:
+    DEFAULT_AGENT_RESOURCE_BUNDLE_ID = (
+        "cpu.5xlarge" if ENABLE_AGENT_HA_MODE else "cpu.3xlarge"
+    )
+DEFAULT_AGENT_REPLICAS: Final[int] = 2 if ENABLE_AGENT_HA_MODE else 1
+# Agent deployment configuration (HPA autoscaling)
+DEFAULT_AGENT_DEPLOYMENT_MIN_COMPUTES: Final[int] = 0
+DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES: Final[int] = 4 if ENABLE_AGENT_HA_MODE else 2
+
+# Default gunicorn timeout in current DRUM is 2 mins
+DEFAULT_DRUM_CLIENT_REQUEST_TIMEOUT: Final[str] = "300"
 
 # DRUM runtime parameters that are safe to include defaultValue in metadata
 DRUM_PARAMS_WITH_DEFAULTS: Final[set[str]] = {
@@ -60,15 +86,6 @@ DRUM_PARAMS_WITH_DEFAULTS: Final[set[str]] = {
     "DRUM_WORKER_CONNECTIONS",
     "DRUM_CLIENT_REQUEST_TIMEOUT",
 }
-
-# Custom Model resource bundle configuration
-DEFAULT_AGENT_RESOURCE_BUNDLE_ID: Final[str] = "cpu.3xlarge"
-DEFAULT_AGENT_REPLICAS: Final[int] = 2 if ENABLE_AGENT_HA_MODE else 1
-
-# Agent deployment configuration (HPA autoscaling)
-DEFAULT_AGENT_DEPLOYMENT_MIN_COMPUTES: Final[int] = 0
-DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES: Final[int] = 4 if ENABLE_AGENT_HA_MODE else 2
-
 
 EXCLUDE_PATTERNS = [
     re.compile(pattern)
@@ -105,20 +122,32 @@ agent_retrieval_agent_application_name: str = "agent_retrieval_agent"
 agent_retrieval_agent_asset_name: str = f"[{PROJECT_NAME}] [agent_retrieval_agent]"
 agent_retrieval_agent_application_path = project_dir.parent / "agent_retrieval_agent"
 
-_is_dragent_server_enabled = (
-    os.environ.get("ENABLE_DRAGENT_SERVER", "").strip().lower() == "true"
-)
+
+def _find_workflow_yaml() -> Path | None:
+    """Locate workflow.yaml for the agent.
+
+    Checks the agent root directory first, then falls back to the agent/ subdirectory.
+    """
+    base = project_dir.parent / "agent_retrieval_agent"
+
+    primary = base / "workflow.yaml"
+    if primary.exists():
+        return primary
+
+    fallback = base / "agent" / "workflow.yaml"
+    if fallback.exists():
+        return fallback
+
+    return None
 
 
 def _check_a2a_server_enabled() -> bool:
-    workflow_yaml_path = (
-        project_dir.parent / "agent_retrieval_agent" / "agent" / "workflow.yaml"
-    )
-    if not workflow_yaml_path.exists():
+    workflow_yaml_path = _find_workflow_yaml()
+    if workflow_yaml_path is None:
         return False
     with open(workflow_yaml_path) as f:
         workflow_config = yaml.safe_load(f) or {}
-    a2a = workflow_config.get("general", {}).get("front_end", {}).get("a2a")
+    a2a = ((workflow_config.get("general") or {}).get("front_end") or {}).get("a2a")
     return a2a is not None
 
 
@@ -386,6 +415,7 @@ if ENABLE_AGENT_HA_MODE:
     pulumi.info(
         f"High Availability mode enabled, agent deployment will be configured with:\n"
         f"- workers: {DEFAULT_CUSTOM_MODEL_WORKERS}\n"
+        f"- resource_bundle: {DEFAULT_AGENT_RESOURCE_BUNDLE_ID}\n"
         f"- replicas: {DEFAULT_AGENT_REPLICAS}\n"
         f"- max_computes: {DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES}"
     )
@@ -544,6 +574,7 @@ agent_runtime_parameter_values.extend(
     ]
 )
 
+
 # Handle session secret key credential
 SESSION_SECRET_KEY: Final[str] = "SESSION_SECRET_KEY"
 
@@ -561,7 +592,37 @@ if session_secret_key := os.environ.get(SESSION_SECRET_KEY):
         ),
     )
 
-if _is_dragent_server_enabled:
+IDP_AGENT_ID_PARAM: Final[str] = "IDP_AGENT_ID"
+idp_agent_id = os.environ.get(IDP_AGENT_ID_PARAM, "")
+if idp_agent_id:
+    agent_runtime_parameter_values.append(
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+            key=IDP_AGENT_ID_PARAM,
+            type="string",
+            value=idp_agent_id,
+        ),
+    )
+    pulumi.info(f"Configured with IDP_AGENT_ID: {idp_agent_id}")
+
+
+PRIVATE_JWK_PARAM: Final[str] = "IDP_AGENT_PRIVATE_KEY_JWK"
+private_jwk = os.environ.get(PRIVATE_JWK_PARAM)
+if private_jwk:
+    private_jwk_cred = pulumi_datarobot.ApiTokenCredential(
+        agent_retrieval_agent_asset_name + " Private JWK",
+        args=pulumi_datarobot.ApiTokenCredentialArgs(api_token=str(private_jwk)),
+    )
+    agent_runtime_parameter_values.append(
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+            type="credential",
+            key=PRIVATE_JWK_PARAM,
+            value=private_jwk_cred.id,
+        ),
+    )
+    pulumi.info("Configured with IDP_AGENT_PRIVATE_KEY_JWK credential")
+
+
+if ENABLE_DRAGENT_SERVER:
     enable_dragent_server_runtime_param = (
         pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
             key="ENABLE_DRAGENT_SERVER",
@@ -593,11 +654,12 @@ agent_retrieval_agent_custom_model = pulumi_datarobot.CustomModel(
     runtime_parameter_values=agent_runtime_parameter_values,
 )
 
+_dr_url = get_datarobot_url()
+_dr_web_url = _dr_url.removesuffix("/api/v2")
+
 agent_retrieval_agent_custom_model_endpoint = (
     agent_retrieval_agent_custom_model.id.apply(
-        lambda id: (
-            f"{os.getenv('DATAROBOT_ENDPOINT')}/genai/agents/fromCustomModel/{id}/chat/"
-        )
+        lambda id: f"{_dr_url}/genai/agents/fromCustomModel/{id}/chat/"
     )
 )
 
@@ -623,15 +685,9 @@ agent_retrieval_agent_blueprint = pulumi_datarobot.LlmBlueprint(
     prompt_type="ONE_TIME_PROMPT",
 )
 
-datarobot_url = (
-    os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2")
-    .rstrip("/")
-    .rstrip("/api/v2")
-)
-
 agent_retrieval_agent_playground_url = pulumi.Output.format(
     "{0}/usecases/{1}/agentic-playgrounds/{2}/comparison/chats",
-    datarobot_url,
+    _dr_web_url,
     use_case.id,
     agent_retrieval_agent_playground.id,
 )
@@ -736,24 +792,20 @@ if os.environ.get("AGENT_DEPLOY") != "0":
     agent_retrieval_agent_deployment_endpoint = (
         agent_retrieval_agent_agent_deployment.id.apply(
             lambda id: (
-                f"{os.getenv('DATAROBOT_ENDPOINT')}/deployments/{id}/directAccess"
-                if _is_dragent_server_enabled
-                else f"{os.getenv('DATAROBOT_ENDPOINT')}/deployments/{id}"
+                f"{_dr_url}/deployments/{id}/directAccess"
+                if ENABLE_DRAGENT_SERVER
+                else f"{_dr_url}/deployments/{id}"
             )
         )
     )
     agent_retrieval_agent_deployment_completions_endpoint = (
         agent_retrieval_agent_agent_deployment.id.apply(
-            lambda id: (
-                f"{os.getenv('DATAROBOT_ENDPOINT')}/deployments/{id}/chat/completions"
-            )
+            lambda id: f"{_dr_url}/deployments/{id}/chat/completions"
         )
     )
     agent_retrieval_agent_deployment_a2a_endpoint = (
         agent_retrieval_agent_agent_deployment.id.apply(
-            lambda id: (
-                f"{os.getenv('DATAROBOT_ENDPOINT')}/deployments/{id}/directAccess/a2a/"
-            )
+            lambda id: f"{_dr_url}/deployments/{id}/directAccess/a2a/"
         )
     )
 
@@ -782,7 +834,7 @@ agent_retrieval_agent_app_runtime_parameters = [
         value=agent_retrieval_agent_deployment_endpoint,
     ),
 ]
-if _is_dragent_server_enabled:
+if ENABLE_DRAGENT_SERVER:
     agent_retrieval_agent_app_runtime_parameters.append(
         pulumi_datarobot.ApplicationSourceRuntimeParameterValueArgs(
             key="ENABLE_DRAGENT_SERVER",
@@ -803,7 +855,7 @@ agent_retrieval_agent_agent_runtime_parameters = [
         value=agent_retrieval_agent_deployment_endpoint,
     ),
 ]
-if _is_dragent_server_enabled and _is_a2a_server_enabled:
+if ENABLE_DRAGENT_SERVER and _is_a2a_server_enabled:
     agent_retrieval_agent_agent_runtime_parameters.append(
         pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
             key=agent_retrieval_agent_application_name.upper() + "_A2A_ENDPOINT",

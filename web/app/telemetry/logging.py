@@ -19,21 +19,10 @@ import sys
 import time
 import traceback
 from datetime import datetime, timezone
-from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Coroutine, Dict, Literal, ParamSpec, TypeVar, Union
+from typing import Any, Callable, Coroutine, Dict, ParamSpec, TypeVar, Union
 
-
-class LogLevel(str, Enum):
-    ERROR = "ERROR"
-    WARN = "WARNING"
-    WARNING = "WARNING"
-    INFO = "INFO"
-    DEBUG = "DEBUG"
-
-
-FormatType = Literal["json", "text"]
-
+from app.telemetry.enums import FormatType, LogLevel
 
 _STANDARD_LOG_RECORD_ATTRS = set(
     logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()
@@ -281,13 +270,15 @@ def get_logger(
     # Create handler with appropriate formatter
     handler = logging.StreamHandler(stream)
     if format_type == "json":
-        handler.setFormatter(JsonFormatter())
+        formatter: logging.Formatter = JsonFormatter()
     else:
-        text_formatter = TextFormatter(
+        formatter = TextFormatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-        text_formatter.converter = time.gmtime
-        handler.setFormatter(text_formatter)
+        formatter.converter = time.gmtime
+
+    formatter = RedactingFormatter(formatter)
+    handler.setFormatter(formatter)
 
     # Configure logger
     logger = logging.getLogger(name)

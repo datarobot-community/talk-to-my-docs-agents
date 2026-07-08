@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 import os
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -25,7 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel
 
-from app import create_app
+from app import STATIC_DIR, create_app
 from app.auth.api_key import APIKeyValidator, DRUser
 from app.chats import ChatRepository
 from app.config import Config
@@ -43,6 +44,29 @@ from app.users.user import User, UserCreate, UserRepository
 async def migrate_tables_to_db(db: DBCtx) -> None:
     async with db.engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _vite_manifest() -> Generator[None, None, None]:
+    """
+    Ensure a minimal Vite manifest exists so `serve_root` can render index.html
+    without requiring a full `frontend_web` build. If a real build is already
+    present (e.g. local dev), leave it alone; otherwise write a dummy one and
+    remove it afterward.
+    """
+    manifest_path = STATIC_DIR / ".vite" / "manifest.json"
+    if manifest_path.exists():
+        yield
+        return
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps({"index.html": {"file": "assets/index.js", "css": []}})
+    )
+    try:
+        yield
+    finally:
+        manifest_path.unlink(missing_ok=True)
 
 
 @pytest.fixture()

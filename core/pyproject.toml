@@ -9,9 +9,9 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "aiosqlite>=0.21.0,<0.22",
-    "datarobot[auth-authlib,core]>=3.9.1",
+    "datarobot[auth-authlib,core,fs]>=3.16.0",
     "duckdb>=1.3.1,<1.4",
-    "fsspec==2025.3.0",  # forced into slightly older version from datarobot[genai] transitive dependencies
+    "fsspec>=2025.5,<2025.6",
     "openai>=1.59.9,<2",
     "pdf2image>=1.17.0",
     "pillow>=12.2.0",  # CVE-2026-25990, CVE-2026-40192
@@ -27,6 +27,14 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# numpy is a transitive dep (datarobot/duckdb/fsspec). 2.5 ships PEP 695 `type`
+# stubs that mypy only parses when targeting >=3.12; we type-check against the 3.11
+# floor, and core has no lockfile so `uv sync` otherwise resolves the latest (2.5.x)
+# and mypy fails parsing numpy/__init__.pyi. Cap below 2.5 (drop when mypy's
+# python_version is raised).
+constraint-dependencies = ["numpy<2.5"]
 
 [dependency-groups]
 dev = [

@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .enums import FormatType, LogLevel
 from .logging import (
-    FormatType,
     JsonFormatter,
-    LogLevel,
     TextFormatter,
     get_logger,
     init_logging,

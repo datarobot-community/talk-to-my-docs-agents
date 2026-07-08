@@ -5,21 +5,19 @@ description = "Implementation of agent_retrieval_agent"
 readme = "README.md"
 requires-python = ">=3.11, <3.14"
 dependencies = [
-    "datarobot-genai[crewai, dragent]==0.10.0",
-    "datarobot-moderations==11.2.20",
-    "datarobot-drum==1.17.11.post1",  # Lift upper limit after asyncio migration finished
-    "datarobot-mlops==11.1.0",
-    "openai>=1.81.0,<2.0.0",
-    "litellm>=1.72.1,<1.83.0,!=1.82.7,!=1.82.8",  # >=1.83.0 requires openai>=2 which conflicts with project; CVEs suppressed in trivy-ignore.rego
+    "datarobot-genai[crewai, dragent, auth]==0.21.1",
+    "datarobot-moderations[all]==11.2.33",
+    "datarobot-drum==1.17.17",
+    "datarobot-mlops==11.1.28",
     "langchain-litellm>=0.2.3",
     "opentelemetry-api>=1.33.0,<2.0.0",
     "opentelemetry-sdk>=1.33.0,<2.0.0",
 
     # Core dependencies
     "aiosqlite>=0.21.0,<0.22",
-    "datarobot[auth-authlib,core]>=3.13.0",
+    "datarobot[auth-authlib,core,fs]>=3.16.0",
     "duckdb>=1.3.1,<1.4",
-    "fsspec==2025.3.0",  # forced into slightly older version from datarobot[genai] transitive dependencies
+    "fsspec>=2025.5,<2025.6",
     "pdf2image>=1.17.0",
     "pillow>=12.2.0",  # CVE-2026-25990, CVE-2026-40192
     "pymupdf>=1.25.5",
@@ -56,7 +54,7 @@ dev = [
 # Additional dependencies required to run the agent in DataRobot Agentic playground
 agentic_playground = [
     "fastapi[All]==0.118.2",
-    "psutil>=5.9.8",
+    "psutil>=5.9.8",  # datarobot[core] requires psutil>=7.2.1; keep a floor, not an exact pin
     "ipykernel<6.29.0",
     "jupyter-client>=8.6.3",
     "jupyter-core>=5.8.1",
@@ -154,10 +152,15 @@ docstring-code-line-length = "dynamic"
 [tool.yamlfix]
 allow_duplicate_keys = true
 line_length = 120
+comments_min_spaces_from_content = 1
 
 [tool.mypy]
 strict = true
-python_version = "3.11"
+# numpy 2.4+ ships PEP 695 `type` statements in its stubs, which mypy cannot
+# parse with a target below 3.12 (parse-time error, not maskable via
+# follow_imports). The agent still runs on Python 3.11; `ruff target-version =
+# "py311"` continues to enforce 3.11-compatible syntax in this repo's own code.
+python_version = "3.12"
 plugins = "pydantic.mypy"
 exclude = """(?x)(
     output/ # exclude files starting with "output"
@@ -170,6 +173,7 @@ exclude = """(?x)(
     | e2e/
     | tests/
     | build/
+    | agent/core/  # symlink to ../core/src/core; type-checked in the core component with full datarobot typing
   )"""
 check_untyped_defs = true
 disallow_any_generics = true
@@ -194,25 +198,89 @@ module = "datarobot.*"
 implicit_reexport = true
 follow_imports = "skip"
 
+[[tool.mypy.overrides]]
+# Symlink to ../core/src/core; type-checked in the core component where
+# datarobot typing is fully available.
+module = "agent.core.*"
+follow_imports = "skip"
+
 
 [tool.uv]
 required-version = ">=0.7.0"
 override-dependencies = [
-    "fastapi>=0.118.2,<0.133.0",  # 0.132 is the last version compatiable with NAT 1.4.1
-    "ragas>=0.3.8",
-    "starlette>=0.49.1,<1.0.0",  # 0.52.1 is the last version compatiable with NAT 1.4.1
+    # Compatibility
+    "fastapi>=0.118.2,<0.133.0",  # NAT 1.6.0 uses add_event_handler removed in starlette 1.0 (https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1882)
+    "starlette>=0.49.1,<1.0.0",  # constrained by fastapi<0.133.0 (https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1882)
     "pyarrow==21.0.0",
-    # There is an incompatiblity between the opentelemetry-semantic-conventions-ai==0.4.14
-    # and crewai==1.9.3. See BUZZOK-29568 for more info.
-    "opentelemetry-semantic-conventions-ai==0.4.13",
+    # crewai and drum pin otel to 1.34.x but datarobot-moderations needs 0.60b1
+    # instrumentation which requires otel 1.39.x. Override the entire otel family
+    # to stay version-synchronized at 1.39.x / 0.60b1. The upper bound is pinned to
+    # <1.40.0 because semantic-conventions is held at 0.60b1 (otel 1.39.x); without
+    # it the api/exporters float to 1.42.x while the sdk stays at 1.39.x, producing
+    # an ImportError (OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED).
+    "opentelemetry-api>=1.39.0,<1.40.0",
+    "opentelemetry-sdk>=1.39.0,<1.40.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.39.0,<1.40.0",
+    "opentelemetry-exporter-otlp-proto-common>=1.39.0,<1.40.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.39.0,<1.40.0",
     # nvidia-nat-crewai==1.4.1 pins crewai<1.0.0 but datarobot-genai requires crewai>=1.1.0.
     # Override until nvidia-nat-crewai ships a fix upstream (BUZZOK-29844).
     # Upstream issue: https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1802
-    "crewai[litellm]>=1.1.0,<2.0.0",
-    "litellm>=1.72.1,<1.83.0,!=1.82.7,!=1.82.8",  # >=1.83.0 requires openai>=2; CVEs suppressed in trivy-ignore.rego
+    "crewai[litellm]>=1.11.0,<2.0.0",
+
+    # NOTE: the template's "unlock latest langgraph" overrides (langgraph>=1.1.0,
+    # langgraph-prebuilt>=1.0.0) are intentionally omitted. This is a crewai/dragent
+    # agent, not the langgraph framework variant; forcing langgraph 1.x drags
+    # langchain-core to 1.x, which pulls langchain-community 0.4.x (no
+    # chat_models.vertexai) and breaks ragas 0.4.3's import.
+
+    # Keep this in sync with the ag-ui-protocol version in fastapi_server/pyproject.toml of the
+    # recipe-datarobot-agent-application.
+    "ag-ui-protocol==0.1.15",
+
+    # ragas 0.4.3 hard-imports langchain_community.chat_models.vertexai, which was
+    # removed in langchain-community 0.4.x. Pin community to 0.3.x (where the module
+    # still exists); nvidia-nat-langchain 1.7.0 accepts community ~=0.3.
+    "langchain-community>=0.3,<0.4",
+
+    # CVE fixes
+    "langgraph-checkpoint>=3.0.0",
+    "litellm>=1.83.7,<2.0.0",
+    "nltk>=3.9.4",
+    "openai>=2.30.0",  # litellm >= 1.83.7 pins openai at 2.24, causing dependency rollback and re-introducing CVEs.
+    "pdfminer.six>=20251230",
+    "ragas>=0.4.3",
+    "mako>=1.3.12",
+
+    # Excluded
     "gevent; sys_platform == 'never'",  # not used; therefore removed
     "onnxruntime; sys_platform == 'never'",  # not used; therefore removed
     "fastembed; sys_platform == 'never'",  # not used; therefore removed
+    "langchain-milvus; sys_platform == 'never'",  # not used and having CVEs
+    "pymilvus; sys_platform == 'never'",  # not used and having CVEs
+    "diskcache; sys_platform == 'never'",  # not used and having CVEs
+    "annoy; sys_platform == 'never'",  # not used, issues with building it
+    "uv; sys_platform == 'never'",  # not a runtime dependency
+    "build; sys_platform == 'never'",  # Python build system pulled in by crewai; runtime unnecessary
+    "kubernetes; sys_platform == 'never'",  # K8s client pulled in by crewai-tools; not used
+    "stagehand; sys_platform == 'never'",  # Playwright web automation pulled in by crewai-tools; not used
+    "pytube; sys_platform == 'never'",  # YouTube downloader pulled in by crewai-tools; not used
+    "youtube-transcript-api; sys_platform == 'never'",  # YouTube transcripts pulled in by crewai-tools; not used
+    "lancedb; sys_platform == 'never'",  # optional vector DB pulled in by crewai; not used
+    "openpyxl; sys_platform == 'never'",  # Excel parser pulled in by crewai-tools; not used
+    # NOTE: python-docx is NOT excluded here (unlike the base template) — this docs
+    # agent imports `docx` directly in agent/core/document_loader for .docx parsing.
+    "llama-index-cli; sys_platform == 'never'",  # CLI tool pulled in by llama-index; not needed at runtime
+    "scikit-network; sys_platform == 'never'",  # graph analysis pulled in by ragas; not used
+    # nemoguardrails — server / CLI stack pulled in via datarobot-moderations[all]; not used at runtime
+    "watchdog; sys_platform == 'never'",  # file watcher for guardrails hot-reload; not used
+    # prompt-toolkit and wcwidth are intentionally NOT excluded: IPython (via ipykernel / agentic_playground)
+    # has a hard import-time dependency on prompt-toolkit; excluding it causes ModuleNotFoundError at runtime.
+    "typer; sys_platform == 'never'",  # CLI framework for guardrails CLI; not used
+    "shellingham; sys_platform == 'never'",  # shell detection; sole dependent was typer
+    # deepeval — CLI / reporting stack pulled in via datarobot-moderations[all]; not used at runtime
+    "pyfiglet; sys_platform == 'never'",  # ASCII banner renderer for deepeval CLI; not used
+    "wheel; sys_platform == 'never'",  # build-time packaging tool; not a runtime dependency
 ]
 package = true
 environments = [

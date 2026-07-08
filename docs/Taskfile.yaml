@@ -3,7 +3,6 @@
 version: '3'
 
 vars:
-  BIN: "{{.TASKFILE_DIR}}/.bin"
   UV_CMD:
     sh: |
       if command -v env >/dev/null 2>&1; then
@@ -15,24 +14,24 @@ vars:
 tasks:
   install:
     desc: Install documentation dependencies
-    dir: "{{.BIN}}"
+    dir: ".bin"
     cmds:
       - "{{.UV_CMD}} sync"
 
   build:
     desc: Compile component docs into README.md and static site
-    dir: "{{.BIN}}"
+    dir: ".bin"
     cmds:
       - "{{.UV_CMD}} run properdocs build --config-file properdocs.yml"
 
   validate:
     desc: Validate documentation completeness and links
-    dir: "{{.BIN}}"
+    dir: ".bin"
     cmds:
       - "{{.UV_CMD}} run properdocs build --strict --config-file properdocs.yml"
 
   serve:
     desc: Serve documentation locally for preview
-    dir: "{{.BIN}}"
+    dir: ".bin"
     cmds:
       - "{{.UV_CMD}} run properdocs serve --config-file properdocs.yml"

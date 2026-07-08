@@ -56,15 +56,17 @@ tasks:
       AGENT_DEPLOYMENT_URL: http://localhost:8842
       TEST_USER_EMAIL: "developer@example.com"
       TEST_USER_API_KEY: "{{ .DATAROBOT_API_TOKEN }}"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "{{ .OTEL_EXPORTER_OTLP_ENDPOINT | default \"http://localhost:4318\" }}"
-      OTEL_SERVICE_NAME: talk-to-my-docs-web-local
     deps:
       - auth-check
       - build-frontend
       - migrate
     cmds:
       - echo "🔨 Starting development server"
-      - PYTHONPATH="$CALCULATED_PYTHONPATH" uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+      - |
+        (cd .. && DR_SKIP_PLUGIN_UPDATE_CHECK=true dr xp --plain-output) &
+        DR_XP_PID=$!
+        trap "kill $DR_XP_PID 2>/dev/null || true" EXIT
+        PYTHONPATH="$CALCULATED_PYTHONPATH" uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
   lint:
     silent: true

@@ -21,11 +21,21 @@ from collections import namedtuple
 # Ensure the test directory is in sys.path for proper imports
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+AGENT_MEMORY_TTL_SECONDS = "AGENT_MEMORY_TTL_SECONDS"
+
 
 # Patch all Pulumi resources and functions used in the module
 @pytest.fixture(autouse=True)
 def pulumi_mocks(monkeypatch, tmp_path):
     monkeypatch.setenv("PULUMI_STACK_CONTEXT", "unittest")
+    # Neutralize the module-level export() calls in infra.__init__ before the
+    # first infra import below triggers them outside a pulumi Stack context.
+    monkeypatch.setattr("datarobot_pulumi_utils.pulumi.export", MagicMock())
+    # Mock pulumi module-level functions before any infra import so that
+    # pulumi.export / pulumi.info calls at module scope don't raise.
+    monkeypatch.setattr("pulumi.export", MagicMock())
+    monkeypatch.setattr("pulumi.info", MagicMock())
+    monkeypatch.setattr("pulumi.warn", MagicMock())
     # Mock infra.__init__ exported objects
     mock_use_case = MagicMock()
     mock_use_case.id = "mock-use-case-id"
@@ -69,7 +79,10 @@ def pulumi_mocks(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "pulumi_datarobot.ApplicationSourceRuntimeParameterValueArgs", MagicMock()
     )
-
+    # raising=False: this repo has agent memory disabled (use_agent_memory: none) and
+    # the infra module never references MemorySpace, so it is absent on the pinned
+    # pulumi-datarobot. Tolerate its absence instead of failing fixture setup.
+    monkeypatch.setattr("pulumi_datarobot.MemorySpace", MagicMock(), raising=False)
     # Mock CustomModelRuntimeParameterValueArgs to return simple namedtuple objects
     # Namedtuples are YAML-safe and have the attributes we need
     RuntimeParam = namedtuple(
@@ -92,9 +105,6 @@ def pulumi_mocks(monkeypatch, tmp_path):
     patcher.start()
 
     # Mock pulumi functions
-    monkeypatch.setattr("pulumi.export", MagicMock())
-    monkeypatch.setattr("pulumi.info", MagicMock())
-    monkeypatch.setattr("pulumi.warn", MagicMock())
     monkeypatch.setattr("pulumi.log.error", MagicMock())
 
     # Mock CustomModelDeployment
@@ -107,7 +117,7 @@ def pulumi_mocks(monkeypatch, tmp_path):
     from datarobot.enums import EXECUTION_ENVIRONMENT_VERSION_BUILD_STATUS
 
     _default_ee_version = MagicMock()
-    _default_ee_version.id = "69b92f2cb83bd6076dfbfbb4"
+    _default_ee_version.id = "69e2134aa5df12076d70afe7"
     _default_ee_version.build_status = (
         EXECUTION_ENVIRONMENT_VERSION_BUILD_STATUS.SUCCESS
     )
@@ -116,30 +126,45 @@ def pulumi_mocks(monkeypatch, tmp_path):
         MagicMock(return_value=_default_ee_version),
     )
 
-    # Mock Output to behave like a Pulumi Output with .apply(), support subscript notation, and from_input
-    class MockOutput(MagicMock):
-        def __new__(cls, val=None, *args, **kwargs):
-            m = super().__new__(cls)
-            m.apply = MagicMock(side_effect=lambda fn: fn(val))
-            return m
+    # Mock Output to behave like a Pulumi Output with .apply(), from_input, and all.
+    _mock_output_format = MagicMock()
+
+    class MockOutput:
+        def __init__(self, val=None):
+            self._val = val
+
+        def apply(self, fn):
+            if isinstance(self._val, list):
+                return MockOutput(fn(self._val))
+            return MockOutput(fn(self._val))
+
+        @classmethod
+        def from_input(cls, val):
+            return cls(val or "")
+
+        @classmethod
+        def all(cls, *outputs):
+            combined = cls(None)
+
+            def lazy_apply(fn):
+                return cls("output-all-applied")
+
+            combined.apply = lazy_apply  # type: ignore[method-assign]
+            return combined
+
+        format = _mock_output_format
 
         @classmethod
         def __class_getitem__(cls, item):
             return cls
 
-    # Set from_input() and format() as class methods that can be tracked
-    MockOutput.from_input = MagicMock()
-    MockOutput.format = MagicMock()
     monkeypatch.setattr("pulumi.Output", MockOutput)
 
     # Mock ApiTokenCredential to return a mock with .id as a pulumi.Output
     # This prevents MagicMock objects from being serialized to YAML
     def create_api_token_credential(*args, **kwargs):
         credential = MagicMock()
-        # Create a mock that will be recognized as pulumi.Output by isinstance check
-        output_mock = MagicMock(spec=MockOutput)
-        output_mock.__class__ = MockOutput
-        credential.id = output_mock
+        credential.id = MockOutput("mock-credential-id")
         return credential
 
     monkeypatch.setattr(
@@ -273,7 +298,7 @@ def test_execution_environment_pinned_set(monkeypatch):
     )
     monkeypatch.setenv(
         "DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID",
-        "69b92f2cb83bd6076dfbfbb4",
+        "69e2134aa5df12076d70afe7",
     )
 
     import importlib
@@ -286,7 +311,7 @@ def test_execution_environment_pinned_set(monkeypatch):
         "Using default GenAI Agentic Execution Environment."
     )
     agent_infra.pulumi.info.assert_any_call(
-        "Using existing execution environment: python-311-genai-agents-id Version ID: 69b92f2cb83bd6076dfbfbb4"
+        "Using existing execution environment: python-311-genai-agents-id Version ID: 69e2134aa5df12076d70afe7"
     )
 
     # Check that ExecutionEnvironment.get was called with the correct parameters
@@ -294,7 +319,7 @@ def test_execution_environment_pinned_set(monkeypatch):
     args, kwargs = agent_infra.pulumi_datarobot.ExecutionEnvironment.get.call_args
 
     assert kwargs["id"] == "python-311-genai-agents-id"
-    assert kwargs["version_id"] == "69b92f2cb83bd6076dfbfbb4"
+    assert kwargs["version_id"] == "69e2134aa5df12076d70afe7"
     assert (
         kwargs["resource_name"]
         == "[unittest] [agent_retrieval_agent] Execution Environment"
@@ -345,7 +370,7 @@ def test_resolve_execution_environment_version_not_found_returns_none(monkeypatc
 
     monkeypatch.setenv(
         "DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID",
-        "a1b2c3d4e5f6071829364455",
+        "69e2134aa5df12076d70afe7",
     )
     monkeypatch.setattr(
         "datarobot.ExecutionEnvironmentVersion.get",
@@ -360,7 +385,7 @@ def test_resolve_execution_environment_version_not_found_returns_none(monkeypatc
     assert version_id is None
     agent_infra.pulumi.warn.assert_called_once()
     call_msg = agent_infra.pulumi.warn.call_args[0][0]
-    assert "a1b2c3d4e5f6071829364455" in call_msg
+    assert "69e2134aa5df12076d70afe7" in call_msg
     assert "using latest" in call_msg
 
 
@@ -456,6 +481,7 @@ def test_reset_environment_between_tests():
 def test_custom_model_created(monkeypatch):
     """Test that pulumi_datarobot.CustomModel is created with correct arguments."""
     monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
+    monkeypatch.delenv(AGENT_MEMORY_TTL_SECONDS, raising=False)
 
     import importlib
     import infra.agent_retrieval_agent as agent_infra
@@ -465,6 +491,7 @@ def test_custom_model_created(monkeypatch):
 
     environment_variables = {
         "SESSION_SECRET_KEY": "secret_value",
+        "MEM0_API_KEY": "some_mem0_api_key",
     }
     with patch.dict(os.environ, environment_variables):
         importlib.reload(agent_infra)
@@ -497,18 +524,24 @@ def test_custom_model_created(monkeypatch):
     assert session_secret_param.type == "credential"
     assert session_secret_param.value is not None
 
+    memory_ttl_param = next(
+        (p for p in runtime_parameter_values if p.key == AGENT_MEMORY_TTL_SECONDS),
+        None,
+    )
+    assert memory_ttl_param is None
+
 
 def test_custom_model_created_pinned_version_id(monkeypatch):
     """Test that pulumi_datarobot.CustomModel is created with correct arguments."""
     monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
     monkeypatch.setenv(
-        "DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID", "69b92f2cb83bd6076dfbfbb4"
+        "DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID", "69e2134aa5df12076d70afe7"
     )
     monkeypatch.setattr(
         "pulumi_datarobot.ExecutionEnvironment",
         MagicMock(
             return_value=MagicMock(
-                id="default-id", version_id="69b92f2cb83bd6076dfbfbb4"
+                id="default-id", version_id="69e2134aa5df12076d70afe7"
             )
         ),
     )
@@ -528,12 +561,13 @@ def test_custom_model_created_pinned_version_id(monkeypatch):
     agent_infra.pulumi_datarobot.CustomModel.assert_called_once()
     args, kwargs = agent_infra.pulumi_datarobot.CustomModel.call_args
     assert kwargs["base_environment_id"] == "default-id"
-    assert kwargs["base_environment_version_id"] == "69b92f2cb83bd6076dfbfbb4"
+    assert kwargs["base_environment_version_id"] == "69e2134aa5df12076d70afe7"
 
 
 def test_custom_model_resource_bundle_and_replicas(monkeypatch):
     """Test that CustomModel is created with correct resource_bundle_id and replicas."""
     monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("ENABLE_AGENT_HA_MODE", raising=False)
 
     import importlib
     import infra.agent_retrieval_agent as agent_infra
@@ -545,11 +579,28 @@ def test_custom_model_resource_bundle_and_replicas(monkeypatch):
     agent_infra.pulumi_datarobot.CustomModel.assert_called_once()
     args, kwargs = agent_infra.pulumi_datarobot.CustomModel.call_args
 
-    # Verify resource_bundle_id is set to cpu.3xlarge
+    # Verify resource_bundle_id is set to cpu.3xlarge (non-HA default)
     assert kwargs["resource_bundle_id"] == "cpu.3xlarge"
 
     # Verify replicas is set to 1
     assert kwargs["replicas"] == 1
+
+
+def test_custom_model_resource_bundle_and_replicas_ha_mode(monkeypatch):
+    """HA mode uses larger resource bundle and multiple replicas."""
+    monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
+    monkeypatch.setenv("ENABLE_AGENT_HA_MODE", "true")
+
+    import importlib
+    import infra.agent_retrieval_agent as agent_infra
+
+    agent_infra.pulumi_datarobot.CustomModel.reset_mock()
+    importlib.reload(agent_infra)
+
+    agent_infra.pulumi_datarobot.CustomModel.assert_called_once()
+    args, kwargs = agent_infra.pulumi_datarobot.CustomModel.call_args
+    assert kwargs["resource_bundle_id"] == "cpu.5xlarge"
+    assert kwargs["replicas"] == 2
 
 
 def test_agentic_playground_and_blueprint_created(monkeypatch):
@@ -557,14 +608,21 @@ def test_agentic_playground_and_blueprint_created(monkeypatch):
     and the Playground URL is added to outputs."""
     monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
     monkeypatch.setenv("DATAROBOT_ENDPOINT", "https://example.datarobot.com/api/v2")
+    # get_datarobot_url() (used to build the web URL) otherwise falls through to a
+    # /clientConfig API lookup which, once an SDK client has been configured by an
+    # earlier test, returns the default app.datarobot.com instead of the endpoint
+    # above — making this assertion order-dependent. DATAROBOT_WEB_SERVER_URL is the
+    # highest-priority source and skips that lookup, keeping the test deterministic.
+    monkeypatch.setenv("DATAROBOT_WEB_SERVER_URL", "https://example.datarobot.com")
 
     import importlib
     import infra.agent_retrieval_agent as agent_infra
 
-    # Reset the mocks to clear calls from the initial import
+    # Reset the mocks to clear calls from the initial import.
     agent_infra.pulumi_datarobot.Playground.reset_mock()
     agent_infra.pulumi_datarobot.LlmBlueprint.reset_mock()
     agent_infra.pulumi.export.reset_mock()
+    agent_infra.pulumi.Output.format.reset_mock()
     importlib.reload(agent_infra)
 
     # Check that Agentic Playground was created
@@ -596,9 +654,13 @@ def test_agentic_playground_and_blueprint_created(monkeypatch):
     assert "Agent Playground URL " + agent_infra.agent_retrieval_agent_asset_name in export_names  # fmt: skip
 
     # Check the format of the URL
-    agent_infra.pulumi.Output.format.assert_any_call(
+    from datarobot_pulumi_utils.common import get_datarobot_url
+
+    expected_web_url = get_datarobot_url().removesuffix("/api/v2")
+    agent_infra.pulumi.Output.format.assert_called_once()
+    assert agent_infra.pulumi.Output.format.call_args.args == (
         "{0}/usecases/{1}/agentic-playgrounds/{2}/comparison/chats",
-        "https://example.datarobot.com",
+        expected_web_url,
         "mock-use-case-id",
         agent_infra.agent_retrieval_agent_playground.id,
     )
@@ -843,6 +905,7 @@ class TestEnableAgentHAMode:
 
         assert agent_infra.ENABLE_AGENT_HA_MODE is False
         assert agent_infra.DEFAULT_CUSTOM_MODEL_WORKERS == "2"
+        assert agent_infra.DEFAULT_AGENT_RESOURCE_BUNDLE_ID == "cpu.3xlarge"
         assert agent_infra.DEFAULT_AGENT_REPLICAS == 1
         assert agent_infra.DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES == 2
 
@@ -856,6 +919,7 @@ class TestEnableAgentHAMode:
 
         assert agent_infra.ENABLE_AGENT_HA_MODE is False
         assert agent_infra.DEFAULT_CUSTOM_MODEL_WORKERS == "2"
+        assert agent_infra.DEFAULT_AGENT_RESOURCE_BUNDLE_ID == "cpu.3xlarge"
         assert agent_infra.DEFAULT_AGENT_REPLICAS == 1
         assert agent_infra.DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES == 2
 
@@ -869,6 +933,7 @@ class TestEnableAgentHAMode:
 
         assert agent_infra.ENABLE_AGENT_HA_MODE is True
         assert agent_infra.DEFAULT_CUSTOM_MODEL_WORKERS == "5"
+        assert agent_infra.DEFAULT_AGENT_RESOURCE_BUNDLE_ID == "cpu.5xlarge"
         assert agent_infra.DEFAULT_AGENT_REPLICAS == 2
         assert agent_infra.DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES == 4
 
@@ -892,10 +957,12 @@ class TestEnableAgentHAMode:
             assert agent_infra.ENABLE_AGENT_HA_MODE is expected
             if expected:
                 assert agent_infra.DEFAULT_CUSTOM_MODEL_WORKERS == "5"
+                assert agent_infra.DEFAULT_AGENT_RESOURCE_BUNDLE_ID == "cpu.5xlarge"
                 assert agent_infra.DEFAULT_AGENT_REPLICAS == 2
                 assert agent_infra.DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES == 4
             else:
                 assert agent_infra.DEFAULT_CUSTOM_MODEL_WORKERS == "2"
+                assert agent_infra.DEFAULT_AGENT_RESOURCE_BUNDLE_ID == "cpu.3xlarge"
                 assert agent_infra.DEFAULT_AGENT_REPLICAS == 1
                 assert agent_infra.DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES == 2
 
@@ -1233,6 +1300,7 @@ class TestGenerateMetadataYaml:
 
         # Verify parameters maintain order and correct types
         params = metadata["runtimeParameterDefinitions"]
+
         assert len(params) == 5
 
         # String parameter - should NOT have defaultValue (not in allowlist)
@@ -1336,6 +1404,29 @@ class TestGenerateMetadataYaml:
         assert metadata["runtimeParameterDefinitions"][0]["fieldName"] == "NEW_PARAM"
 
 
+class TestAgentMemoryRuntimeParameter:
+    def test_ttl_runtime_parameter_excluded_when_memory_disabled(self, monkeypatch):
+        """Test that the agent memory TTL runtime parameter is excluded by default."""
+        monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
+        monkeypatch.setenv(AGENT_MEMORY_TTL_SECONDS, "86400")
+
+        import importlib
+        import infra.agent_retrieval_agent as agent_infra
+
+        importlib.reload(agent_infra)
+
+        memory_ttl_param = next(
+            (
+                param
+                for param in agent_infra.agent_runtime_parameter_values
+                if param.key == AGENT_MEMORY_TTL_SECONDS
+            ),
+            None,
+        )
+
+        assert memory_ttl_param is None
+
+
 class TestDrumRuntimeParameters:
     def test_drum_runtime_parameters_included(self, monkeypatch):
         """Test that DRUM concurrency runtime parameters are included in agent_runtime_parameter_values."""
@@ -1356,11 +1447,12 @@ class TestDrumRuntimeParameters:
                 "DRUM_SERVER_TYPE",
                 "DRUM_GUNICORN_WORKER_CLASS",
                 "DRUM_WORKER_CONNECTIONS",
+                "DRUM_CLIENT_REQUEST_TIMEOUT",
             ]
         }
 
-        # Verify all 4 DRUM parameters are present
-        assert len(drum_params) == 4
+        # Verify all 5 DRUM parameters are present
+        assert len(drum_params) == 5
 
         # Check CUSTOM_MODEL_WORKERS
         assert drum_params["CUSTOM_MODEL_WORKERS"].type == "numeric"
@@ -1377,6 +1469,10 @@ class TestDrumRuntimeParameters:
         # Check DRUM_WORKER_CONNECTIONS
         assert drum_params["DRUM_WORKER_CONNECTIONS"].type == "numeric"
         assert drum_params["DRUM_WORKER_CONNECTIONS"].value == "1"
+
+        # Check DRUM_CLIENT_REQUEST_TIMEOUT
+        assert drum_params["DRUM_CLIENT_REQUEST_TIMEOUT"].type == "numeric"
+        assert drum_params["DRUM_CLIENT_REQUEST_TIMEOUT"].value == "300"
 
     def test_drum_runtime_parameters_passed_to_custom_model(self, monkeypatch):
         """Test that DRUM runtime parameters are passed to CustomModel."""
@@ -1397,7 +1493,87 @@ class TestDrumRuntimeParameters:
             "DRUM_SERVER_TYPE",
             "DRUM_GUNICORN_WORKER_CLASS",
             "DRUM_WORKER_CONNECTIONS",
+            "DRUM_CLIENT_REQUEST_TIMEOUT",
         ]
 
         found_keys = [param.key for param in runtime_params if param.key in drum_keys]
         assert set(found_keys) == set(drum_keys)
+
+
+class TestA2AEndpointRuntimeParameter:
+    """Guard against silent A2A breakage: inject the deployment A2A endpoint runtime
+    parameter when DRAgent and an A2A server block are both enabled."""
+
+    A2A_ENDPOINT_PARAM_KEY = "AGENT_RETRIEVAL_AGENT_A2A_ENDPOINT"
+
+    def _setup_workspace(self, tmp_path, monkeypatch, workflow_content: str):
+        """Create a project layout within tmp_path and patch project_dir accordingly.
+
+        Layout: tmp_path/project/infra  (project_dir)
+                tmp_path/project/agent_retrieval_agent/workflow.yaml
+        """
+        project_root = tmp_path / "project"
+        infra_dir = project_root / "infra"
+        infra_dir.mkdir(parents=True)
+        agent_dir = project_root / "agent_retrieval_agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "workflow.yaml").write_text(workflow_content)
+
+        # project_dir is imported from infra.__init__; override it so
+        # _find_workflow_yaml resolves to our temp agent directory.
+        monkeypatch.setattr("infra.project_dir", infra_dir)
+
+    def test_a2a_endpoint_param_present_when_a2a_and_dragent_enabled(
+        self, monkeypatch, tmp_path
+    ):
+        """When workflow.yaml has A2A config and ENABLE_DRAGENT_SERVER=true,
+        the A2A endpoint runtime parameter must appear in agent_retrieval_agent_agent_runtime_parameters."""
+        monkeypatch.setenv("ENABLE_DRAGENT_SERVER", "true")
+        monkeypatch.setenv("AGENT_DEPLOY", "1")
+        monkeypatch.setenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2")
+        monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
+
+        self._setup_workspace(
+            tmp_path,
+            monkeypatch,
+            "general:\n"
+            "  front_end:\n"
+            "    a2a:\n"
+            "      server:\n"
+            "        name: test-agent\n"
+            "        description: Test\n",
+        )
+
+        import importlib
+        import infra.agent_retrieval_agent as agent_infra
+
+        importlib.reload(agent_infra)
+
+        param_keys = [
+            p.key for p in agent_infra.agent_retrieval_agent_agent_runtime_parameters
+        ]
+        assert self.A2A_ENDPOINT_PARAM_KEY in param_keys
+
+    def test_a2a_endpoint_param_absent_when_a2a_disabled(self, monkeypatch, tmp_path):
+        """When workflow.yaml has no A2A config, the A2A endpoint parameter must NOT
+        appear in agent_retrieval_agent_agent_runtime_parameters — even if DRAgent is on."""
+        monkeypatch.setenv("ENABLE_DRAGENT_SERVER", "true")
+        monkeypatch.setenv("AGENT_DEPLOY", "1")
+        monkeypatch.setenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2")
+        monkeypatch.delenv("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", raising=False)
+
+        self._setup_workspace(
+            tmp_path,
+            monkeypatch,
+            "general:\n  front_end:\n    streaming: true\n",
+        )
+
+        import importlib
+        import infra.agent_retrieval_agent as agent_infra
+
+        importlib.reload(agent_infra)
+
+        param_keys = [
+            p.key for p in agent_infra.agent_retrieval_agent_agent_runtime_parameters
+        ]
+        assert self.A2A_ENDPOINT_PARAM_KEY not in param_keys

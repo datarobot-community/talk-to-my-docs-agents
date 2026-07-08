@@ -1,7 +1,7 @@
 # Talk to My Docs: Agent agent_retrieval_agent
 
 The DataRobot agent template provides a starting point for building custom agents that can be deployed in DataRobot.
-This template can be modified to support various frameworks, including CrewAI, LangGraph, Llama-Index, or
+This template can be modified to support various frameworks, including **NAT** ([NeMo Agent Toolkit](https://docs.nvidia.com/nemo/agent-toolkit/index.html); see [docs/agent/frameworks/nat.md](../docs/agent/frameworks/nat.md)), CrewAI, LangGraph, LlamaIndex, or
 a generic base framework that can be customized to use any other agentic framework.
 
 This README provides an overview of how to set up, develop, test, and deploy an agent using this template.

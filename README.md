@@ -36,6 +36,9 @@
   <a href="/LICENSE.txt">
     <img src="https://img.shields.io/github/license/datarobot-community/datarobot-agent-templates" alt="License">
   </a>
+  <a href="https://join.slack.com/t/datarobot-community/shared_invite/zt-3uzfp8k50-SUdMqeux25ok9_5wr4okrg">
+    <img src="https://img.shields.io/badge/%23applications-a?label=Slack&labelColor=30373D&color=81FBA6" alt="Slack #applications">
+  </a>
 </p>
 
 # Talk to My Docs
@@ -83,9 +86,9 @@ This command will automatically:
 - Update the DataRobot CLI (`dr self update`).
 - Prepare the environment file if needed (`dr dotenv setup --if-needed`).
 - Install all dependencies (`task install`).
-- Start the required infrastructure (`task infra:start`).
+- Deploy the LLM Blueprint and other DataRobot backend resources, and print local OTel tracing credentials (`task infra:start`).
 
-Once it completes, you’re ready to begin development.
+OTel tracing is configured automatically — credentials are written to `pulumi_config.json` and picked up by all services at startup (see [docs/base.md](docs/base.md#local-tracing-otel)).
 
 You’ll see a confirmation message like:
 
@@ -330,24 +333,35 @@ All subprojects use [Taskfile.dev](https://taskfile.dev/#/installation) for comm
 
 ### Getting started
 
-To get started, run:
+**One-time setup** — installs all dependencies, deploys the LLM Blueprint and other DataRobot backend resources, and configures local OTel tracing automatically:
 
 ```sh
-task install
-task deploy-dev
+task start
 ```
 
-This will install all dependencies for each component, and deploy the backend LLM which sets you up
-for local/codespace development.
-
-To get the three components running locally (the agent, backend web, and frontend web server),
-you can run the following command:
+**Daily local development** — starts all three services (backend, agent, frontend):
 
 ```sh
 task dev
 ```
 
-If you want to work on each one separately, you can run each one on its own, as described in the following sections.
+This is the fast everyday command — no Pulumi operations, just starts the local processes. Traces flow automatically if `task start` has been run at least once.
+
+**Local tracing dashboard** — starts the experimentation dashboard at http://127.0.0.1:8090:
+
+```sh
+task infra:dev
+```
+
+This reads the active Pulumi stack to find the Use Case ID automatically. Run this in a separate terminal alongside `task dev` to see traces in real time. It runs in the foreground — Ctrl+C to stop.
+
+**Full backend redeploy** — use this if you need to update DataRobot backend resources (LLM Blueprint, Deployment, etc.):
+
+```sh
+task deploy-dev
+```
+
+If you want to work on each service separately, you can run each one on its own, as described in the following sections.
 
 #### Running the agent locally
 
@@ -689,6 +703,6 @@ See [`agent_retrieval_agent/agent/static_docs/README.md`](agent_retrieval_agent/
 - [Vite Documentation](https://vitejs.dev/)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [DR CLI](https://github.com/datarobot-oss/cli)
-- [Local tracing setup](LOCAL_TRACING.md)
+- [Local tracing setup](docs/base.md#local-tracing-otel)
 
 For more details, see the README in each subproject.

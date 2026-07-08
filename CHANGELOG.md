@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [11.10.0] - 2026-07-06
+
+### Added
+
+- OpenTelemetry chat metrics.
+- DataRobot user ID to OTel spans.
+- CLI `versions.yaml` support.
+- Slack community badge to README.
+
+### Changed
+
+- OTel emits now use Use Cases.
+- Modernized Taskfile and template.
+- Updated docs for automatic OTel configuration via `pulumi_config.json`.
+- Updated terminal output when app template is configured.
+- Switched the default agent to use NVIDIA NAT (NVIDIA Agent Toolkit).
+- Upgraded `af-component-agent` from 11.8.0 to 11.10.41.
+
+### Fixed
+
+- Read-write lock assignment in `DBCtx`.
+- Token usage reporting.
+- CrewAI tokens mapped to semantic convention attributes.
+- Updated litellm, chromadb, and jupyter-server to patch known security vulnerabilities.
+
+
 ## [11.7.3] - 2026-05-11
 
 ### Added

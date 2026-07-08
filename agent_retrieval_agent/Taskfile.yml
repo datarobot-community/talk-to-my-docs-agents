@@ -1,9 +1,11 @@
 ---
 # https://taskfile.dev
 version: '3'
+env:
+  # Opt out of NeMo Agent Toolkit anonymous CLI telemetry and skip its interactive
+  # [Y/n] consent prompt, which otherwise blocks non-interactive `nat dragent` runs.
+  NAT_TELEMETRY_ENABLED: 'false'
 vars:
-  LOCAL_NAT_LOG_LEVEL:
-    sh: echo "${LOCAL_NAT_LOG_LEVEL:-info}"
   # Cross-platform environment cleaning - uses 'env -u' on Unix systems, falls back to empty string on Windows
   UV_CMD:
     sh: |
@@ -93,21 +95,29 @@ tasks:
     cmds:
       - echo "Running CLI {{.CLI_ARGS}}"
       - |
+        # DRAgent mode: forward cli.py commands to nat dragent and exit.
+        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
+          export DRAGENT_CONFIG_FILE="${DRAGENT_CONFIG_FILE:-workflow.yaml}"
+          set -- {{.CLI_ARGS}}
+          if [ $# -eq 0 ]; then
+            echo "Usage: task agent_retrieval_agent:cli -- <execute|execute-deployment> [flags]"; exit 1
+          fi
+          CMD="$1"; shift
+          case "$CMD" in
+            execute-deployment) {{.UV_CMD}} run nat dragent query "$@" ;;
+            execute-custom-model) echo "execute-custom-model is not supported in dragent mode. Use execute-deployment instead."; exit 1 ;;
+            execute) {{.UV_CMD}} run nat dragent run "$@" ;;
+            *) echo "Unknown command '$CMD'. Supported: execute, execute-deployment"; exit 1 ;;
+          esac
+          exit $?
+        fi
         if [ "{{.START_DEV}}" -eq "1" ]; then
           # Kill any existing dev server processes
-          if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-            pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || true
-          else
-            pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
-          fi
+          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
 
           # Start dev server in background
           echo "🚀 Starting dev server in background..."
-          if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-            {{.UV_CMD}} run nat --log-level {{.LOCAL_NAT_LOG_LEVEL}} start dragent_fastapi --config_file agent/workflow.yaml --reload true --port {{.AGENT_PORT}} &
-          else
-            {{.UV_CMD}} run python dev.py &
-          fi
+          {{.UV_CMD}} run python dev.py &
           DEV_SERVER_PID=$!
           echo "Dev server started with PID: $DEV_SERVER_PID"
 
@@ -124,16 +134,13 @@ tasks:
             i=$((i + 1))
             if [ $i -eq 30 ]; then
               echo "❌ Dev server failed to start within 30 seconds"
-              if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-                pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || true
-              else
-                pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
-              fi
+              pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
               exit 1
             fi
           done
         fi
       - |
+        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then exit 0; fi
         # Run CLI and handle cleanup regardless of exit code
         CLI_EXIT_CODE=0
         UV_PROJECT={{.TASKFILE_DIR}} {{.UV_CMD}} run cli.py {{.CLI_ARGS}} || CLI_EXIT_CODE=$?
@@ -153,11 +160,7 @@ tasks:
         # Clean up dev server processes if we started them
         if [ "{{.START_DEV}}" -eq "1" ]; then
           echo "🛑 Stopping dev server..."
-          if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-            pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || true
-          else
-            pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
-          fi
+          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
           echo "✅ Dev server stopped"
         fi
         exit $CLI_EXIT_CODE
@@ -165,13 +168,17 @@ tasks:
   dev:
     desc: 🔨 Run the development server
     deps: [auth-check]
-    env:
-      OTEL_EXPORTER_OTLP_ENDPOINT: '{{ .OTEL_EXPORTER_OTLP_ENDPOINT | default "http://localhost:4318" }}'
-      OTEL_SERVICE_NAME: talk-to-my-docs-agent-local
     cmds:
       - |
+        ENTITY_ID=$(python3 -c "import json; print(json.load(open('../pulumi_config.json')).get('OTEL_ENTITY_ID',''))" 2>/dev/null || true)
+        if [ -n "${ENTITY_ID:-}" ] && [ -n "${DATAROBOT_API_TOKEN:-}" ]; then
+          export OTEL_EXPORTER_OTLP_HEADERS="x-datarobot-entity-id=${ENTITY_ID},x-datarobot-api-key=${DATAROBOT_API_TOKEN}"
+        fi
+        (cd .. && DR_SKIP_PLUGIN_UPDATE_CHECK=true dr xp --plain-output) &
+        DR_XP_PID=$!
+        trap "kill $DR_XP_PID 2>/dev/null || true" EXIT
         if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-          {{.UV_CMD}} run nat --log-level {{.LOCAL_NAT_LOG_LEVEL}} start dragent_fastapi --config_file agent/workflow.yaml --reload true --port {{.AGENT_PORT}}
+          {{.UV_CMD}} run nat dragent serve --config_file workflow.yaml --reload true --port {{.AGENT_PORT}}
         else
           {{.UV_CMD}} run python dev.py --autoreload
         fi
@@ -182,7 +189,7 @@ tasks:
       - |
         echo "Stopping development server"
         if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-          pkill -f 'nat.*start dragent_fastapi' 2>/dev/null || echo "No development server process found"
+          pkill -f 'nat dragent serve' 2>/dev/null || echo "No development server process found"
         else
           pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || echo "No development server process found"
         fi

@@ -13,6 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 general:
+  # Export agent spans under the dragent (nat) runtime. Without this block nat
+  # initializes no OTel exporter, so the agent server emits no traces and the
+  # service name is empty. (On the drum runtime OTel was wired separately.)
+  telemetry:
+    tracing:
+      otelcollector:
+        _type: datarobot_otelcollector
+        project: agent_retrieval_agent
   front_end:
     _type: dragent_fastapi
     # Step adaptor is not necessary for custom agents
@@ -45,7 +53,18 @@ llms:
 workflow:
   _type: crewai_agent
   llm_name: datarobot_llm
-  description: CrewAI planner/writer agent
+  description: CrewAI planner/writer agent with automatic memory capture and retrieval
+  middleware: [datarobot_moderation, datarobot_otel_conventions]
+middleware:
+  datarobot_moderation:
+    # Guards can be configured inline by adding the moderation field here.
+    # See the Guardrails Configuration Guide at https://pypi.org/project/datarobot-moderations/
+    # If there is no inline configuration then moderation_config.yaml will be loaded, if present.
+    # If no guards are configured then the middleware is a no-op.
+    _type: datarobot_moderation
+  datarobot_otel_conventions:
+    _type: datarobot_otel_conventions
+
   # tool_names:
   #   - remote_agent
 authentication:

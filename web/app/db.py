@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import AsyncGenerator, cast
 
 from core.persistent_fs.dr_file_system import (
-    DRFileSystem,
+    LegacyDRFileSystem,
     all_env_variables_present,
     calculate_checksum,
 )
@@ -32,7 +33,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 def _prepare_persistence_storage(
     engine: AsyncEngine,
-) -> tuple[DRFileSystem, str] | tuple[None, None]:
+) -> tuple[LegacyDRFileSystem, str] | tuple[None, None]:
     if not all_env_variables_present():
         return None, None
 
@@ -42,7 +43,7 @@ def _prepare_persistence_storage(
         return None, None
 
     file_path = engine.url.database
-    persistent_fs = DRFileSystem()
+    persistent_fs = LegacyDRFileSystem()
     return persistent_fs, file_path
 
 
@@ -57,13 +58,19 @@ class DBCtx:
             expire_on_commit=False,
         )
 
-        self._persistence_fs: DRFileSystem | None
+        self._persistence_fs: LegacyDRFileSystem | None
         self._db_path: str | None
         self._persistence_fs, self._db_path = _prepare_persistence_storage(engine)
 
         self._rw_lock: AbstractReadWriteLock = MockReadWriteLock()
         if self._persistence_fs:
-            self._lock = ThreadReadWriteLock()
+            self._rw_lock = ThreadReadWriteLock()
+
+        # Session shared by all `session()` calls within an open `session_scope()`
+        # in the current task context (e.g. a chat turn's create/update calls).
+        self._scoped_session: ContextVar[AsyncSession | None] = ContextVar(
+            "dbctx_scoped_session", default=None
+        )
 
     @asynccontextmanager
     async def _read_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -101,15 +108,52 @@ class DBCtx:
             if self._persistence_fs:
                 new_checksum = calculate_checksum(cast(str, self._db_path))
                 if new_checksum != checksum:
-                    self._persistence_fs.put_file(self._db_path, self._db_path)
+                    self._persistence_fs.put_file(
+                        cast(str, self._db_path), cast(str, self._db_path)
+                    )
 
     @asynccontextmanager
     async def session(
         self, writable: bool = False
     ) -> AsyncGenerator[AsyncSession, None]:
+        if scoped_session := self._scoped_session.get():
+            yield scoped_session
+            return
+
         session_context = self._write_session if writable else self._read_session
         async with session_context() as session:
             yield session
+
+    @asynccontextmanager
+    async def session_scope(self) -> AsyncGenerator[AsyncSession, None]:
+        """
+        Open a single writable session shared by every `session()` call made within
+        this scope in the current task. `commit()` calls against the shared session
+        become flushes; the one real commit happens on scope exit. This keeps bursts
+        of repository calls (e.g. creating a chat, a message, then updating it) on
+        one connection, one transaction, and one persistence sync instead of one of
+        each per call.
+        """
+        if self._scoped_session.get():
+            raise RuntimeError("session_scope cannot be nested.")
+
+        async with self._write_session() as session:
+            token = self._scoped_session.set(session)
+            try:
+                yield session
+                await session.commit()
+            finally:
+                self._scoped_session.reset(token)
+
+    async def commit(self, session: AsyncSession) -> None:
+        """
+        Commit the session, unless it is the shared session of an open
+        `session_scope()` — then flush so the scope owner commits once at exit.
+        """
+        if self._scoped_session.get() is session:
+            await session.flush()
+            return
+        await session.commit()
 
     async def shutdown(self) -> None:
         """

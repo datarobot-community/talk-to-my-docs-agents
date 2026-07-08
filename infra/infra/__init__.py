@@ -18,9 +18,10 @@ Core and first Pulumi set of resources.
 import os
 from pathlib import Path
 
-from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 import pulumi
 import pulumi_datarobot as datarobot
+from datarobot_pulumi_utils.pulumi import export
+from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 
 
 __all__ = ["use_case", "project_dir"]
@@ -39,3 +40,14 @@ else:
         resource_name=f"Talk to My Docs [{PROJECT_NAME}]",
         description="""*Talk to My Docs** delivers a seamless **talk-to-your-docs** experience, transforming documents search and summary. Simply connect the application with your document sources. Then, ask a question, and the agents will work with you to achieve your goals.""",
     )
+
+export("DATAROBOT_USE_CASE_ID", use_case.id)
+
+datarobot_base_url = (
+    os.environ.get("DATAROBOT_ENDPOINT", "").rstrip("/").removesuffix("/api/v2")
+)
+export("OTEL_EXPORTER_OTLP_ENDPOINT", f"{datarobot_base_url}/otel")
+export(
+    "OTEL_ENTITY_ID",
+    pulumi.Output.format("experiment_container-{0}", use_case.id),
+)

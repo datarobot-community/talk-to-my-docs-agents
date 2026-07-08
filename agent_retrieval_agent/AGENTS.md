@@ -1,5 +1,6 @@
 # Agent Development Instructions
 
+
 ## Dependencies Installation
 
 The following command should be run after agent code modification:
@@ -8,9 +9,13 @@ The following command should be run after agent code modification:
 dr task run agent_retrieval_agent:install
 ```
 
+> **Warning:** When using a custom Docker context (`DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT` is unset and an `agent/docker_context/` folder is present), modifying `pyproject.toml` or `uv.lock` triggers a full execution environment rebuild on the next deployment. This rebuild can take **10–20 minutes** depending on the number of dependencies. When using the default DataRobot execution environment (the default configuration), dependency changes do not trigger a rebuild.
+
 ## Agent Structure
 
-Agent must be implemented in the following location withing the `agent_retrieval_agent/agent` directory. None of the other files outside of this directory are related.
+Agent application code must be implemented in the `agent_retrieval_agent/agent` directory. The NAT orchestration file `workflow.yaml` lives at the agent component root (`agent_retrieval_agent/workflow.yaml`), not inside `agent_retrieval_agent/agent/`. NAT framework agents require that file on DRUM and DRAgent.
+
+For detailed documentation, see [docs/agent/README.md](../docs/agent/README.md). When upgrading layouts that still have `agent_retrieval_agent/agent/workflow.yaml`, see [workflow.yaml path migration](../docs/agent/migration-workflow-yaml-path.md).
 
 
 
@@ -18,62 +23,50 @@ Agent must implement the following components:
 
 ### 1. Class Definition
 
-```python
-from crewai import LLM, Agent, Task
-from datarobot_genai.crewai.agent import CrewAIAgent
+`MyAgent` is generated using `datarobot_agent_class_from_crew`:
 
-class MyAgent(CrewAIAgent):
-    """Your agent description here."""
+```python
+from crewai import Agent, Crew, Process, Task
+from datarobot_genai.crewai.agent import datarobot_agent_class_from_crew
+
+kickoff_inputs = lambda user_prompt_content: {"topic": str(user_prompt_content), "chat_history": ""}
+MyAgent = datarobot_agent_class_from_crew(crew, agents, tasks, kickoff_inputs)
 ```
 
 **Important**: `MyAgent` class should NOT be renamed!
 
-### 2. Required Properties and Methods in Class Definition
+### 2. Agent and Task Definitions
 
-#### `llm()` Method
-
-**CRITICAL**: Do NOT modify, delete, or change this method. It MUST be kept exactly as shown below in the agent implementation:
+Define CrewAI agents with `role`, `goal`, and `backstory`, and tasks with `description` and `expected_output`:
 
 ```python
-def llm(
-        self,
-        auto_model_override: bool = True,
-    ) -> LLM:
-        api_base = self.litellm_api_base(self.config.llm_deployment_id)
-        model = self.model or self.default_model
-        if auto_model_override and not self.config.use_datarobot_llm_gateway:
-            model = self.default_model
-        if self.verbose:
-            print(f"Using model: {model}")
+agent_planner = Agent(
+    role="Planner",
+    goal="Create a simple, focused outline for {topic} with key points and sources.",
+    backstory=make_system_prompt("You create brief, structured outlines..."),
+    allow_delegation=False,
+    verbose=True,
+    llm=llm,
+)
 
-        return LLM(
-            model=model,
-            api_base=api_base,
-            api_key=self.api_key,
-            timeout=self.timeout,
-        )
+task_plan = Task(
+    description="Create a simple outline for {topic} with: ...",
+    expected_output="A simple outline with 10-15 bullet points...",
+    agent=agent_planner,
+)
 ```
 
-**Why this is required**: This method handles model configuration, API authentication, and DataRobot LLM Gateway integration. Changing it will break deployment.
+### 3. LLM Resolution
 
-#### `agents` Property
-Defines the list of sub-agents
+The LLM is resolved via `get_llm()` from `datarobot_genai.crewai.llm`:
 
 ```python
-@property
-def agents(self) -> List[Agent]:
-        return [self.agent_1, self.agent_2]
+from datarobot_genai.crewai.llm import get_llm
+
+llm = get_llm()
 ```
 
-#### `tasks` Property
-Defines the list of tasks for the sub-agents
-
-```python
-@property
-def tasks(self) -> List[Task]:
-        return [self.task_1, self.task_2]
-```
-
+**CRITICAL**: Do NOT instantiate LLMs directly. Always use `get_llm()` which handles DataRobot LLM Gateway integration, deployed models, and external LLM providers. To add primary/fallback provider support, use `get_router_llm()` instead — see [LLM provider fallback](../docs/agent/llm-fallback.md).
 
 ### 4. Agent tools
 
@@ -83,13 +76,9 @@ def tasks(self) -> List[Task]:
 dr task run agent_retrieval_agent:install
 ```
 
-**IMPORTANT**: Tools must be imported and used in `MyAgent` implementation.
+**IMPORTANT**: Tools must be imported and used in agent/task definitions.
 
-
-### 5. Preferred LLM model
-
-Preferred model should be set using ```self.model = "{preferred_model_here}"``` which will then be read in each ```self.llm()``` invocation.
-**Important**: `self.model` parameter must be prefixed with `datarobot/`.
+For detailed CrewAI documentation, see [docs/agent/frameworks/crewai.md](../docs/agent/frameworks/crewai.md).
 
 ## Agent Testing
 
@@ -111,3 +100,26 @@ Run the following shell command to validate the agent after deployment. If the r
 ```shell
 task agent:cli -- execute-deployment --user_prompt "Agent specific prompt to validate that it's working" --deployment_id <deployment_id>
 ```
+
+## Setting up custom metric and report values
+
+Refer to [Custom metrics](../docs/agent/custom-metrics.md) page for how to set up and report values to custom metrics.
+
+## Migrations
+
+### 11.9.3 — `workflow.yaml` location
+
+Agent component 11.9.3 moved `workflow.yaml` from `agent/agent/workflow.yaml` to `agent/workflow.yaml`. NAT framework agents load this file on **DRUM** and **DRAgent**. See [workflow.yaml path migration](../docs/agent/migration-workflow-yaml-path.md).
+
+### 11.8.8 — New agent format (class-based → factory-based)
+
+Starting with agent component version 11.8.8 ([af-component-agent#474](https://github.com/datarobot-community/af-component-agent/pull/474)), agent templates (except `base`) no longer require defining agents within a `MyAgent` class. Agents are now defined using native framework primitives at module level and converted to `MyAgent` via a helper function (`datarobot_agent_class_from_*`). The LLM is also decoupled from the agent class and injected via `get_llm()`.
+
+If you are upgrading an existing agent from a version prior to 11.8.8, follow the migration guide for your framework:
+
+- [LangGraph migration](../docs/agent/frameworks/migration-to-11.8.8-langgraph.md)
+- [CrewAI migration](../docs/agent/frameworks/migration-to-11.8.8-crewai.md)
+- [LlamaIndex migration](../docs/agent/frameworks/migration-to-11.8.8-llamaindex.md)
+- [Base agent migration](../docs/agent/frameworks/migration-to-11.8.8-base.md)
+- [NAT agent migration](../docs/agent/frameworks/migration-to-11.8.8-nat.md)
+- [workflow.yaml path migration (11.9.3)](../docs/agent/migration-workflow-yaml-path.md)

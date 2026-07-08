@@ -148,7 +148,7 @@ class KnowledgeBaseRepository:
             if not knowledge_base_data.path:
                 knowledge_base.path = f"{owner_id}/{knowledge_base.uuid}"
 
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(knowledge_base)
 
         return knowledge_base
@@ -171,7 +171,7 @@ class KnowledgeBaseRepository:
                 return False
 
             await session.delete(knowledge_base)
-            await session.commit()
+            await self._db.commit(session)
             return True
 
     async def update_knowledge_base(
@@ -196,7 +196,7 @@ class KnowledgeBaseRepository:
                 if value is not None:
                     setattr(kb, field, value)
             kb.updated_at = datetime.now(timezone.utc)
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(kb)
             return kb
 
@@ -223,7 +223,7 @@ class KnowledgeBaseRepository:
                 "Committing update to knowledge base (kb_id=%d).",
                 kb_in_session and kb_in_session.id,
             )
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(kb_in_session)
             return kb_in_session
 

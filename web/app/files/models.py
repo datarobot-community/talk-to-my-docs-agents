@@ -104,7 +104,7 @@ class FileRepository:
 
         async with self._db.session(writable=True) as session:
             session.add(file)
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(file)
 
         return file
@@ -158,7 +158,7 @@ class FileRepository:
             for field, value in file_data.model_dump(exclude_unset=True).items():
                 setattr(file, field, value)
 
-            await session.commit()
+            await self._db.commit(session)
             await session.refresh(file)
             return file
 
@@ -188,5 +188,5 @@ class FileRepository:
                 )
 
             await session.delete(file)
-            await session.commit()
+            await self._db.commit(session)
             return True

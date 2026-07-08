@@ -71,83 +71,6 @@ def display_response_streaming(response: Stream[ChatCompletionChunk]) -> None:
         click.echo(json.dumps(chunk_dict, indent=2))
 
 
-def is_dragent_mode() -> bool:
-    """Check if dragent server mode is enabled via ENABLE_DRAGENT_SERVER env var."""
-    return os.environ.get("ENABLE_DRAGENT_SERVER", "false").lower() == "true"
-
-
-def build_dragent_payload(user_prompt: str) -> dict[str, Any]:
-    """Build an AG-UI RunAgentInput payload for the dragent /generate/stream endpoint."""
-    from uuid import uuid4  # noqa: PLC0415
-
-    return {
-        "threadId": str(uuid4()),
-        "runId": str(uuid4()),
-        "state": [],
-        "tools": [],
-        "context": [],
-        "forwardedProps": {},
-        "messages": [
-            {
-                "id": str(uuid4()),
-                "role": "user",
-                "content": user_prompt,
-            }
-        ],
-    }
-
-
-def execute_dragent_stream(
-    user_prompt: str,
-    url: str,
-    headers: dict[str, str] | None = None,
-) -> None:
-    """POST to a dragent /generate/stream endpoint and print SSE text events."""
-    import logging  # noqa: PLC0415
-
-    import httpx  # noqa: PLC0415
-
-    logger = logging.getLogger(__name__)
-    payload = build_dragent_payload(user_prompt)
-    request_headers = {"Content-Type": "application/json"}
-    if headers:
-        request_headers.update(headers)
-
-    try:
-        with httpx.stream(
-            "POST", url, json=payload, headers=request_headers, timeout=300
-        ) as resp:
-            resp.raise_for_status()
-            click.echo("\nStreaming response:")
-            for line in resp.iter_lines():
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    data = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    logger.debug("Skipping malformed SSE data: %s", line)
-                    continue
-
-                # DRAgentEventResponse wraps events in an "events" list
-                events = data.get("events", [data])
-                for ev in events:
-                    event_type = ev.get("type", "")
-                    if event_type in ("TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_CHUNK"):
-                        click.echo(ev.get("delta", ""), nl=False)
-                    elif event_type == "TEXT_MESSAGE_END":
-                        click.echo("")
-                    elif event_type == "RUN_FINISHED":
-                        click.echo("\nRun finished.")
-                    else:
-                        logger.debug("Unhandled SSE event type: %s", event_type)
-    except httpx.ConnectError:
-        raise click.ClickException(
-            f"Could not connect to {url}. Is the dragent server running?"
-        )
-    except httpx.HTTPStatusError as e:
-        raise click.ClickException(f"HTTP error from dragent server: {e}")
-
-
 @click.group()
 @click.option("--api_token", default=None, help="API token for authentication.")
 @click.option("--base_url", default=None, help="Base URL for the API.")
@@ -220,17 +143,6 @@ def execute(
     if len(user_prompt) == 0 and len(completion_json) == 0:
         raise click.UsageError("User prompt message or completion json must provided.")
 
-    if is_dragent_mode():
-        if not user_prompt:
-            raise click.UsageError("dragent mode requires --user_prompt.")
-        click.echo("Running agent (dragent mode)...")
-        config = Config()
-        execute_dragent_stream(
-            user_prompt,
-            url=f"http://localhost:{config.local_dev_port}/generate/stream",
-        )
-        return
-
     click.echo("Running agent...")
     response = environment.interface.local(
         user_prompt=user_prompt,
@@ -262,11 +174,6 @@ def execute_custom_model(
     # Run the agent with a JSON user prompt
     > task cli -- execute-custom-model --user_prompt '{"topic": "Artificial Intelligence"}' --custom_model_id 680a77a9a3
     """
-    if is_dragent_mode():
-        raise click.UsageError(
-            "execute-custom-model is not supported in dragent mode. "
-            "Use execute-deployment instead."
-        )
     if len(user_prompt) == 0:
         raise click.UsageError("User prompt message must be provided.")
     if len(custom_model_id) == 0:
@@ -321,21 +228,6 @@ def execute_deployment(
         raise click.UsageError("User prompt message or completion json must provided.")
     if len(deployment_id) == 0:
         raise click.UsageError("Deployment ID must be provided.")
-
-    if is_dragent_mode():
-        if not user_prompt:
-            raise click.UsageError("dragent mode requires --user_prompt.")
-        if not environment.base_url:
-            raise click.UsageError("dragent deployment mode requires --base_url.")
-        if not environment.api_token:
-            raise click.UsageError("dragent deployment mode requires --api_token.")
-        click.echo("Querying deployment (dragent mode)...")
-        execute_dragent_stream(
-            user_prompt,
-            url=f"{environment.base_url}/api/v2/deployments/{deployment_id}/generate/stream",
-            headers={"Authorization": f"Bearer {environment.api_token}"},
-        )
-        return
 
     click.echo("Querying deployment...")
     response = environment.interface.deployment(

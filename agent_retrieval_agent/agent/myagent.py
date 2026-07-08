@@ -11,12 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import asyncio
 import json
 import logging
 import uuid
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from ag_ui.core import (
     EventType,
@@ -25,14 +24,11 @@ from ag_ui.core import (
     TextMessageChunkEvent,
 )
 from crewai import LLM, Agent, Crew, Process, Task
-from crewai.events import TaskCompletedEvent as CrewTaskCompletedEvent
-from crewai.events import TaskStartedEvent as CrewTaskStartedEvent
-from crewai.events import crewai_event_bus
-from crewai.events.types.logging_events import (
-    AgentLogsExecutionEvent,
-    AgentLogsStartedEvent,
+from crewai.events import (
+    crewai_event_bus,
 )
 from crewai.tools import BaseTool
+from crewai.types.streaming import CrewStreamingOutput, StreamChunkType
 from datarobot_genai.core.agents import InvokeReturn
 from datarobot_genai.core.agents.base import (
     UsageMetrics,
@@ -45,8 +41,8 @@ from datarobot_genai.core.mcp import MCPConfig
 from datarobot_genai.crewai.agent import CrewAIAgent
 from datarobot_genai.crewai.mcp import mcp_tools_context
 from datarobot_genai.crewai.ragas_events import CrewAIRagasEventListener
-from langchain_core.agents import AgentFinish
 from openai.types.chat import CompletionCreateParams
+from opentelemetry import trace
 
 from agent.config import Config
 from agent.core.document_loader import EMBEDDED_DOCUMENTS_PHRASE, SUPPORTED_FILE_TYPES
@@ -76,7 +72,7 @@ class MyAgent(CrewAIAgent):
         api_base: Optional[str] = None,
         model: Optional[str] = None,
         verbose: bool = True,
-        timeout: Optional[int] = 300,
+        timeout: int = 300,
         llm: Optional[LLM] = None,
         tools: Optional[list[BaseTool]] = None,
         forwarded_headers: Optional[dict[str, str]] = None,
@@ -115,6 +111,24 @@ class MyAgent(CrewAIAgent):
         self.config = Config()
         self.default_model = self.config.llm_default_model
         self.knowledge_base_files: dict[str, dict[str, str]] = {}
+        self._crew: Optional[Crew] = None
+
+    # The datarobot-genai CrewAIAgent base eagerly mutates a *cached* set of crew
+    # agents in these setters (and calls them during __init__, before all state is
+    # set). MyAgent instead builds its agents/crew lazily in the cached `crew`
+    # property, reading these values plus per-agent tools (`+ self.tools`) and
+    # per-agent model selection (`self.llm(preferred_model=...)`). So we override
+    # the setters to simply store the value and skip the base's per-agent mutation,
+    # which would otherwise crash on a half-initialized instance and clobber each
+    # agent's specialized tools/LLM.
+    def set_tools(self, tools: list[BaseTool]) -> None:
+        self._tools = tools
+
+    def set_verbose(self, verbose: bool) -> None:
+        self._verbose = verbose
+
+    def set_llm(self, llm: Optional[LLM]) -> None:
+        self._llm = llm
 
     def llm(
         self,
@@ -137,7 +151,7 @@ class MyAgent(CrewAIAgent):
             LLM: The model to use.
         """
         if self._llm is not None:
-            return self._llm
+            return cast(LLM, self._llm)
 
         api_base = self.litellm_api_base(self.config.llm_deployment_id)
         model = preferred_model or self.model or self.default_model
@@ -158,7 +172,7 @@ class MyAgent(CrewAIAgent):
             if identity_header:
                 config["extra_headers"] = identity_header  # type: ignore[assignment]
 
-        return LLM(**config)  # type: ignore[arg-type]
+        return LLM(**config)
 
     def make_kickoff_inputs(
         self, user_prompt_content: str | dict[str, Any]
@@ -400,32 +414,115 @@ class MyAgent(CrewAIAgent):
                 self.knowledge_base_files[file_uuid] = file_info["encoded_content"]
                 del file_info["encoded_content"]
 
+    @property
     def crew(self) -> Crew:
-        """Override base class crew() to customize Crew options."""
-        return Crew(
-            agents=self.agents,
-            tasks=self.tasks,
-            verbose=self.verbose,
-            process=Process.hierarchical,
-            manager_agent=self.manager_agent,
+        """Build (and cache) the hierarchical Crew.
+
+        Cached so that callers which configure the crew before invoking it (e.g.
+        the dragent entrypoint setting ``agent.crew.stream = True``) mutate the
+        same instance that ``invoke`` later runs. The knowledge-base tools hold a
+        reference to ``self.knowledge_base_files``, which is mutated in place by
+        ``make_kickoff_inputs``, so caching does not stale the KB contents.
+
+        ``stream=True`` so ``invoke`` can stream the manager's synthesized answer to
+        the user token-by-token (first token arrives long before the full multi-agent
+        run finishes — markedly faster *to the user* than batching the whole answer at
+        the end). ``akickoff`` then returns a ``CrewStreamingOutput`` we async-iterate.
+        """
+        if self._crew is None:
+            self._crew = Crew(
+                agents=self.agents,
+                tasks=self.tasks,
+                verbose=self.verbose,
+                process=Process.hierarchical,
+                manager_agent=self.manager_agent,
+            )
+        return self._crew
+
+    def _set_otel_usage_attributes(self, usage_metrics: UsageMetrics) -> None:
+        """Emit GenAI semantic-convention token usage on the active span."""
+        span = trace.get_current_span()
+        if not span.is_recording():
+            return
+
+        usage_attr_map = {
+            "prompt_tokens": "gen_ai.usage.input_tokens",
+            "completion_tokens": "gen_ai.usage.output_tokens",
+        }
+
+        for usage_key, attribute_name in usage_attr_map.items():
+            value = usage_metrics.get(usage_key)
+            if not isinstance(value, (int, float)):
+                continue
+            span.set_attribute(attribute_name, int(value))
+
+    # Specialist roles whose progress is surfaced to the UI as task_progress
+    # chunks. The Manager Agent is deliberately excluded — its delegation/ReAct
+    # text is the crew's internal scaffolding, not user-facing progress, and its
+    # *final* synthesized answer is what we stream as the real answer.
+    _AGENT_DISPLAY_TASK: dict[str, str] = {
+        "Document Agent": "Analyzing content",
+        "Knowledge Base Agent": "Analyzing knowledge base",
+        "Files Agent": "Analyzing files",
+    }
+    _MANAGER_ROLE = "Manager Agent"
+    _FINAL_ANSWER_MARKER = "Final Answer:"
+
+    def _task_progress_chunk(
+        self, task_name: str, agent_name: str, status: str
+    ) -> tuple[TextMessageChunkEvent, None, UsageMetrics]:
+        """Build a task_progress JSON chunk consumed by the web app's TaskProgressProcessor.
+
+        The UI treats any ``delta.content`` starting with ``{"task_progress`` as a
+        workflow-progress event (not answer text), so these never pollute the answer.
+        """
+        zero: UsageMetrics = {
+            "completion_tokens": 0,
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+        }
+        payload = json.dumps(
+            {
+                "task_progress": {
+                    "type": status,
+                    "task_name": task_name,
+                    "agent_name": agent_name,
+                }
+            }
+        )
+        return (
+            TextMessageChunkEvent(
+                type=EventType.TEXT_MESSAGE_CHUNK,
+                message_id=str(uuid.uuid4()),
+                delta=payload,
+            ),
+            None,
+            zero,
         )
 
     async def invoke(self, run_agent_input: Any) -> InvokeReturn:
-        """Override to emit real-time task step events and handle non-streaming LLMs.
+        """Stream the crew's answer to the user in real time (crewai 1.11 streaming).
 
-        The base class emits step events only when the LLM streams tokens. Many
-        LLMs routed through DataRobot's LLM Gateway (Bedrock, Gemini) fall back to
-        non-streaming, producing an empty response. This override:
+        The crew runs with ``stream=True``; ``crew.akickoff`` returns a
+        ``CrewStreamingOutput`` we async-iterate. As chunks arrive we:
 
-        1. Runs the crew with stream=False for reliable text output.
-        2. Listens to TaskStartedEvent / TaskCompletedEvent (fired regardless of
-           LLM streaming) and yields StepStarted/StepFinished AG-UI events in
-           near-real-time while the crew runs in a background asyncio Task.
-        3. Emits the final text from crew_output.raw after execution completes.
+        * Surface specialist-agent transitions (Document / Knowledge Base / Files)
+          as ``task_progress`` JSON chunks the web UI renders as workflow steps. The
+          Manager Agent is skipped here.
+        * Stream the Manager Agent's *final synthesized answer* to the user
+          token-by-token. Because the hierarchical manager's TEXT stream also
+          contains ReAct scaffolding ("Thought:/Action:/Action Input:") that the web
+          UI would otherwise accumulate into the answer, we gate answer output on the
+          ``Final Answer:`` marker: only manager text *after* that marker is streamed
+          as the answer. This yields true progressive streaming of the real answer
+          with zero ReAct/delegation leakage.
+
+        After the stream drains, ``streaming_output.result`` is the final
+        ``CrewOutput`` (``.raw`` + ``token_usage``). ``.raw`` is the source of truth
+        for the answer; if marker-gated streaming emitted nothing (e.g. a manager
+        response without the standard marker), we fall back to emitting ``.raw`` as a
+        single chunk so the user always gets the answer.
         """
-        loop = asyncio.get_running_loop()
-        step_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-
         user_prompt_content = extract_user_prompt_content(run_agent_input)
         thread_id = run_agent_input.thread_id
         run_id = run_agent_input.run_id
@@ -443,170 +540,160 @@ class MyAgent(CrewAIAgent):
             default_usage_metrics(),
         )
 
-        agent_display_task: dict[str, str] = {
-            "Document Agent": "Analyzing content",
-            "Knowledge Base Agent": "Analyzing knowledge base",
-            "Files Agent": "Analyzing files",
-        }
+        usage_metrics = default_usage_metrics()
+        pipeline_interactions = None
 
         with crewai_event_bus.scoped_handlers():
             ragas_listener = CrewAIRagasEventListener()
             ragas_listener.setup_listeners(crewai_event_bus)
 
-            @crewai_event_bus.on(CrewTaskStartedEvent)
-            def _on_task_started(_: Any, event: Any) -> None:
-                task = getattr(event, "task", None)
-                agent = getattr(task, "agent", None)
-                role = getattr(agent, "role", "") if agent else "Manager Agent"
-                name = getattr(task, "name", "") or ""
-                step_name = f"{role}: {name}" if role and name else role or name
-                loop.call_soon_threadsafe(step_queue.put_nowait, ("start", step_name))
-
-            @crewai_event_bus.on(CrewTaskCompletedEvent)
-            def _on_task_completed(_: Any, event: Any) -> None:
-                loop.call_soon_threadsafe(step_queue.put_nowait, ("end", ""))
-
-            @crewai_event_bus.on(AgentLogsStartedEvent)
-            def _on_agent_logs_started(_: Any, event: Any) -> None:
-                role = getattr(event, "agent_role", "")
-                if role == "Manager Agent":
-                    return
-                task_name = agent_display_task.get(role, "Working")
-                loop.call_soon_threadsafe(
-                    step_queue.put_nowait, ("start", f"{role}: {task_name}")
-                )
-
-            @crewai_event_bus.on(AgentLogsExecutionEvent)
-            def _on_agent_logs_execution(_: Any, event: Any) -> None:
-                role = getattr(event, "agent_role", "")
-                if role == "Manager Agent":
-                    return
-                if not isinstance(
-                    getattr(event, "formatted_answer", None), AgentFinish
-                ):
-                    return
-                loop.call_soon_threadsafe(step_queue.put_nowait, ("end", ""))
-
             kickoff_inputs = self.make_kickoff_inputs(user_prompt_content)
-            crew = self.crew()
+            crew = self.crew
+            crew.stream = True
 
-            print("[invoke] Starting crew as background task", flush=True)
-            logger.info("[invoke] Starting crew as background task")
-            # Run crew as a background task so we can yield step events in real time
-            crew_task: asyncio.Task[Any] = asyncio.ensure_future(
-                crew.kickoff_async(inputs=kickoff_inputs)
-            )
+            logger.info("[invoke] Starting crew with stream=True via akickoff")
+            streaming_output = await crew.akickoff(inputs=kickoff_inputs)
 
-            current_step: str | None = None
+            answer_message_id = str(uuid.uuid4())
+            current_specialist: str | None = None
+            answer_streamed = False
+            # Buffer manager text until the Final Answer marker is seen, then stream
+            # everything after it. The buffer also handles a marker split across
+            # chunk boundaries.
+            manager_buffer = ""
+            past_marker = False
 
-            def _task_progress_chunk(
-                task_name: str, agent_name: str, status: str
-            ) -> tuple[TextMessageChunkEvent, None, UsageMetrics]:
-                """Emit a task_progress JSON chunk consumed by the web app's TaskProgressProcessor."""
-                payload = json.dumps(
-                    {
-                        "task_progress": {
-                            "type": status,
-                            "task_name": task_name,
-                            "agent_name": agent_name,
-                        }
-                    }
+            if not isinstance(streaming_output, CrewStreamingOutput):
+                # stream=True should always yield CrewStreamingOutput; guard anyway.
+                response_text = str(getattr(streaming_output, "raw", ""))
+                usage_metrics = self._extract_usage_metrics(streaming_output)
+                self._set_otel_usage_attributes(usage_metrics)
+                pipeline_interactions = self.create_pipeline_interactions_from_messages(
+                    ragas_listener.messages
                 )
-                return (
-                    TextMessageChunkEvent(
-                        type=EventType.TEXT_MESSAGE_CHUNK,
-                        message_id=str(uuid.uuid4()),
-                        delta=payload,
-                    ),
-                    None,
-                    zero,
-                )
-
-            # Drain the step queue while the crew runs, yielding task_progress chunks
-            while not crew_task.done():
-                await asyncio.sleep(0.05)
-                while not step_queue.empty():
-                    action, step_name = step_queue.get_nowait()
-                    logger.info(
-                        f"[invoke] Draining step queue: action={action!r} step={step_name!r}"
+                if response_text:
+                    yield (
+                        TextMessageChunkEvent(
+                            type=EventType.TEXT_MESSAGE_CHUNK,
+                            message_id=answer_message_id,
+                            delta=response_text,
+                        ),
+                        None,
+                        usage_metrics,
                     )
-                    if action == "start":
-                        if current_step:
-                            # Previous task completed (the TaskCompletedEvent may still be in queue)
-                            parts = current_step.split(": ", 1)
-                            yield _task_progress_chunk(
-                                task_name=parts[1] if len(parts) == 2 else current_step,
-                                agent_name=parts[0] if len(parts) == 2 else "",
+                yield (
+                    RunFinishedEvent(
+                        type=EventType.RUN_FINISHED,
+                        thread_id=thread_id,
+                        run_id=run_id,
+                    ),
+                    pipeline_interactions,
+                    usage_metrics,
+                )
+                return
+
+            async for chunk in streaming_output:
+                role = chunk.agent_role or ""
+
+                # Surface specialist transitions as task_progress; skip the manager.
+                if role and role != self._MANAGER_ROLE:
+                    if role != current_specialist:
+                        if current_specialist:
+                            yield self._task_progress_chunk(
+                                task_name=self._AGENT_DISPLAY_TASK.get(
+                                    current_specialist, "Working"
+                                ),
+                                agent_name=current_specialist,
                                 status="task_completed",
                             )
-                        current_step = step_name
-                        parts = step_name.split(": ", 1)
-                        yield _task_progress_chunk(
-                            task_name=parts[1] if len(parts) == 2 else step_name,
-                            agent_name=parts[0] if len(parts) == 2 else "",
+                        yield self._task_progress_chunk(
+                            task_name=self._AGENT_DISPLAY_TASK.get(role, "Working"),
+                            agent_name=role,
                             status="task_started",
                         )
-                    elif action == "end" and current_step:
-                        parts = current_step.split(": ", 1)
-                        yield _task_progress_chunk(
-                            task_name=parts[1] if len(parts) == 2 else current_step,
-                            agent_name=parts[0] if len(parts) == 2 else "",
-                            status="task_completed",
-                        )
-                        current_step = None
-
-            # Drain any events that arrived between the last sleep and task completion
-            while not step_queue.empty():
-                action, step_name = step_queue.get_nowait()
-                if action == "start":
-                    if current_step:
-                        parts = current_step.split(": ", 1)
-                        yield _task_progress_chunk(
-                            task_name=parts[1] if len(parts) == 2 else current_step,
-                            agent_name=parts[0] if len(parts) == 2 else "",
-                            status="task_completed",
-                        )
-                    current_step = step_name
-                    parts = step_name.split(": ", 1)
-                    yield _task_progress_chunk(
-                        task_name=parts[1] if len(parts) == 2 else step_name,
-                        agent_name=parts[0] if len(parts) == 2 else "",
-                        status="task_started",
-                    )
-                elif action == "end" and current_step:
-                    parts = current_step.split(": ", 1)
-                    yield _task_progress_chunk(
-                        task_name=parts[1] if len(parts) == 2 else current_step,
-                        agent_name=parts[0] if len(parts) == 2 else "",
+                        current_specialist = role
+                elif role == self._MANAGER_ROLE and current_specialist:
+                    # Control returned to the manager: close the open specialist step.
+                    yield self._task_progress_chunk(
+                        task_name=self._AGENT_DISPLAY_TASK.get(
+                            current_specialist, "Working"
+                        ),
+                        agent_name=current_specialist,
                         status="task_completed",
                     )
-                    current_step = None
+                    current_specialist = None
 
-            if current_step:
-                parts = current_step.split(": ", 1)
-                yield _task_progress_chunk(
-                    task_name=parts[1] if len(parts) == 2 else current_step,
-                    agent_name=parts[0] if len(parts) == 2 else "",
+                if chunk.chunk_type != StreamChunkType.TEXT or not chunk.content:
+                    continue
+
+                # Only the manager's *final answer* is streamed to the user.
+                if role != self._MANAGER_ROLE:
+                    continue
+
+                if past_marker:
+                    answer_streamed = True
+                    yield (
+                        TextMessageChunkEvent(
+                            type=EventType.TEXT_MESSAGE_CHUNK,
+                            message_id=answer_message_id,
+                            delta=chunk.content,
+                        ),
+                        None,
+                        zero,
+                    )
+                    continue
+
+                manager_buffer += chunk.content
+                marker_idx = manager_buffer.find(self._FINAL_ANSWER_MARKER)
+                if marker_idx == -1:
+                    continue
+                past_marker = True
+                tail = manager_buffer[
+                    marker_idx + len(self._FINAL_ANSWER_MARKER) :
+                ].lstrip()
+                manager_buffer = ""
+                if tail:
+                    answer_streamed = True
+                    yield (
+                        TextMessageChunkEvent(
+                            type=EventType.TEXT_MESSAGE_CHUNK,
+                            message_id=answer_message_id,
+                            delta=tail,
+                        ),
+                        None,
+                        zero,
+                    )
+
+            if current_specialist:
+                yield self._task_progress_chunk(
+                    task_name=self._AGENT_DISPLAY_TASK.get(
+                        current_specialist, "Working"
+                    ),
+                    agent_name=current_specialist,
                     status="task_completed",
                 )
 
-            crew_output = await crew_task
+            crew_output = streaming_output.result
             usage_metrics = self._extract_usage_metrics(crew_output)
+            self._set_otel_usage_attributes(usage_metrics)
             pipeline_interactions = self.create_pipeline_interactions_from_messages(
                 ragas_listener.messages
             )
 
-            response_text = str(crew_output.raw)
-            if response_text:
-                yield (
-                    TextMessageChunkEvent(
-                        type=EventType.TEXT_MESSAGE_CHUNK,
-                        message_id=str(uuid.uuid4()),
-                        delta=response_text,
-                    ),
-                    None,
-                    usage_metrics,
-                )
+            # Fallback: if marker-gated streaming produced no answer text (manager
+            # answered without the standard marker), emit the authoritative .raw.
+            if not answer_streamed:
+                response_text = str(crew_output.raw)
+                if response_text:
+                    yield (
+                        TextMessageChunkEvent(
+                            type=EventType.TEXT_MESSAGE_CHUNK,
+                            message_id=answer_message_id,
+                            delta=response_text,
+                        ),
+                        None,
+                        usage_metrics,
+                    )
 
         yield (
             RunFinishedEvent(
@@ -626,11 +713,16 @@ async def custompy_adaptor(
         forwarded_headers=forwarded_headers,
         authorization_context=authorization_context,
     )
-    async with mcp_tools_context(mcp_config) as mcp_tools:
-        agent = MyAgent(
-            verbose=completion_create_params.get("verbose", True),  # type: ignore[arg-type]
-            timeout=completion_create_params.get("timeout", 300),  # type: ignore[arg-type]
-            tools=mcp_tools,
-            forwarded_headers=forwarded_headers,  # type: ignore[arg-type]
-        )
-        return await agent_chat_completion_wrapper(agent, completion_create_params)
+    # The agent builds its own LLM via MyAgent.llm() (gateway fallback + identity
+    # headers), so we deliberately do not pass `llm=`. MCP tools are injected by
+    # the wrapper via agent.set_tools() using this factory, which keeps the MCP
+    # context open for the lifetime of the (possibly streaming) invocation.
+    mcp_tools_factory = lambda: mcp_tools_context(mcp_config)  # noqa: E731
+    agent = MyAgent(
+        verbose=completion_create_params.get("verbose", True),  # type: ignore[arg-type]
+        timeout=completion_create_params.get("timeout", 300),  # type: ignore[arg-type]
+        forwarded_headers=forwarded_headers,  # type: ignore[arg-type]
+    )
+    return await agent_chat_completion_wrapper(
+        agent, completion_create_params, mcp_tools_factory
+    )

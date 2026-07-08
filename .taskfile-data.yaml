@@ -1,0 +1,17 @@
+---
+# .taskfile-data.yaml
+# Optional configuration for dr task compose
+
+# Development server ports
+# Displayed when running the dev task
+ports:
+  - name: web
+    port: 8080
+  - name: frontend_web
+    port: 5173
+    print_url: true
+  - name: agent_retrieval_agent
+    port: 8842
+  - name: infra
+    port: 8090
+    print_url: true

@@ -44,6 +44,7 @@ logger = logging.getLogger(name=__name__)
 
 class DRAppCtx(BaseModel):
     email: str | None = None
+    user_id: str | None = None
     api_key: str | None = None
 
 
@@ -56,8 +57,9 @@ def get_datarobot_ctx(request: Request) -> DRAppCtx:
         "X-DATAROBOT-API-KEY", config.test_user_api_key
     )
     ext_email = request.headers.get("X-USER-EMAIL", config.test_user_email)
+    dr_user_id = request.headers.get("X-USER-ID")
 
-    return DRAppCtx(api_key=scoped_api_key, email=ext_email)
+    return DRAppCtx(api_key=scoped_api_key, email=ext_email, user_id=dr_user_id)
 
 
 async def get_existing_session(

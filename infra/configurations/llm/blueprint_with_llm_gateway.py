@@ -204,7 +204,27 @@ custom_model_runtime_parameters = [
         value="1",
     ),
 ]
-pulumi.export("Deployment ID " + llm_deployment.pulumi_resource_name, llm_deployment.id)
+# TODO(APP-5859): Move datarobot_url to af-component-base infra/__init__.py
+datarobot_url = (
+    os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2")
+    .rstrip("/")
+    .removesuffix("/api/v2")
+)
+rag_playground_url = pulumi.Output.format(
+    "{0}/usecases/{1}/playgrounds/{2}/comparison/chats",
+    datarobot_url,
+    use_case.id,
+    playground.id,
+)
+deployment_url = pulumi.Output.format(
+    "{0}/console-nextgen/deployments/{1}/overview",
+    datarobot_url,
+    llm_deployment.id,
+)
+
+pulumi.export("Deployment ID " + llm_resource_name, llm_deployment.id)
+pulumi.export("Deployment Console " + llm_resource_name, deployment_url)
 export("LLM_DEPLOYMENT_ID", llm_deployment.id)
 export("USE_DATAROBOT_LLM_GATEWAY", "1")
 export("LLM_DEFAULT_MODEL", default_model)
+pulumi.export("RAG Playground URL " + llm_resource_name, rag_playground_url)

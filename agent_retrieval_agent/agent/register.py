@@ -15,12 +15,16 @@ from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
 from ag_ui.core import RunAgentInput
+from datarobot_genai.core.telemetry.agent import instrument
 from datarobot_genai.dragent.frontends.response import DRAgentEventResponse
 from nat.builder.builder import Builder
 from nat.builder.framework_enum import LLMFrameworkEnum
 from nat.cli.register_workflow import register_per_user_function
 from nat.data_models.agent import AgentBaseConfig
 from nat.data_models.component_ref import FunctionGroupRef
+
+# INSTRUMENTATION CALL IS REQUIRED TO SETUP TRACING AND TELEMETRY FOR AGENTS
+instrument(framework="crewai")
 
 
 class CrewaiAgentConfig(AgentBaseConfig, name="crewai_agent"):  # type: ignore[call-arg, misc]
@@ -56,6 +60,10 @@ async def crewai_agent(
     from agent.myagent import MyAgent
 
     llm = await builder.get_llm(config.llm_name, wrapper_type=LLMFrameworkEnum.CREWAI)
+
+    additional_params = getattr(llm, "additional_params", None)
+    if isinstance(additional_params, dict):
+        additional_params.pop("stream_options", None)
 
     # Fetch workflow tools (from tool_names in workflow config) as CrewAI-compatible tools
     workflow_tools = await builder.get_tools(

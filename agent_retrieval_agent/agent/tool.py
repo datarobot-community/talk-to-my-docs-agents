@@ -46,7 +46,7 @@ class FileListTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def _run(self) -> List[str]:
+    def _run(self) -> List[str] | str:
         _root_readme = static_docs_path / "README.md"
         files = [
             str(f)
@@ -54,7 +54,10 @@ class FileListTool(BaseTool):
             if f.is_file() and f != _root_readme
         ]
         if not files:
-            raise ValueError(
+            # Return (don't raise) so crewai treats it as a tool observation the
+            # agent can act on, rather than a tool-usage error it retries (crewai
+            # >=1.11 retries raised tool exceptions, which is slow and noisy).
+            return (
                 "No files found in the folder. Please verify that you have access to datasets "
                 "and that your credentials are correct."
             )
@@ -85,10 +88,13 @@ class DocumentReadTool(BaseTool):
     def _run(
         self,
         **kwargs: Any,
-    ) -> dict[int, str]:
+    ) -> dict[int, str] | str:
+        # Return (don't raise) error messages: crewai >=1.11 retries raised tool
+        # exceptions (slow/noisy); a returned string is a clean observation the
+        # agent can act on.
         file_path = kwargs.get("file_path", self.file_path)
         if not file_path:
-            raise ValueError("file_path is required but was not provided")
+            return "file_path is required but was not provided"
 
         span = trace.get_current_span()
         span.set_attribute(
@@ -101,8 +107,8 @@ class DocumentReadTool(BaseTool):
                 "gen_ai.tool.call.result", result[:_TOOL_RESULT_MAX_CHARS]
             )
             return pages
-        except Exception as e:
-            raise ValueError(
+        except Exception as e:  # noqa: BLE001 - tool boundary: any read failure becomes an agent observation
+            return (
                 f"Could not read dataset with file_path '{file_path}'. Please verify that the file_path exists "
                 f"and you have access to it. Error: {e}"
             )

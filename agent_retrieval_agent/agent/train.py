@@ -35,7 +35,7 @@ def train(
         inputs["topic"] = inputs["knowledge_base"]["description"]
     else:
         inputs["knowledge_base"] = ""
-    crew = agents.crew()
+    crew = agents.crew
     if skip_files:
         crew.agents = [
             agent for agent in crew.agents if agent.role not in ["Files Agent"]

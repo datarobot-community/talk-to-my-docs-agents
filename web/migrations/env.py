@@ -19,7 +19,7 @@ from typing import cast
 
 from alembic import context
 from core.persistent_fs.dr_file_system import (
-    DRFileSystem,
+    LegacyDRFileSystem,
     all_env_variables_present,
     calculate_checksum,
 )
@@ -93,14 +93,14 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
-def _get_persistence_fs(engine: AsyncEngine) -> DRFileSystem | None:
+def _get_persistence_fs(engine: AsyncEngine) -> LegacyDRFileSystem | None:
     if not all_env_variables_present():
         return None
     if "sqlite" not in engine.url.drivername:
         return None
     if not engine.url.database or ":memory:" == engine.url.database:
         return None
-    return DRFileSystem()
+    return LegacyDRFileSystem()
 
 
 def _prepare_folder(engine: AsyncEngine) -> None:
@@ -131,7 +131,7 @@ async def run_async_migrations() -> None:
     checksum: bytes | None = None
 
     if fs and fs.exists(db_path):
-        fs.get(db_path, db_path)
+        fs.get(cast(str, db_path), cast(str, db_path))
         checksum = calculate_checksum(cast(str, db_path))
 
     async with connectable.connect() as connection:
@@ -142,7 +142,7 @@ async def run_async_migrations() -> None:
     if fs:
         new_checksum = calculate_checksum(cast(str, db_path))
         if new_checksum != checksum:
-            fs.put(db_path, db_path)
+            fs.put(cast(str, db_path), cast(str, db_path))
 
 
 def run_migrations_online() -> None:

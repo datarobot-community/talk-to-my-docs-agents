@@ -38,6 +38,7 @@ from app.api.v1.knowledge_bases import (
 from app.auth.ctx import must_get_auth_ctx
 from app.chats import Chat, ChatCreate, ChatRepository
 from app.config import Config
+from app.db import DBCtx
 from app.files.contents import get_or_create_encoded_content
 from app.messages import Message, MessageCreate, MessageRepository, MessageUpdate, Role
 from app.streams import (
@@ -48,6 +49,7 @@ from app.streams import (
     TaskProgressEvent,
     encode_sse_event,
 )
+from app.telemetry.metrics import track_chat_request
 from app.telemetry.otel import otel
 
 if TYPE_CHECKING:
@@ -186,8 +188,8 @@ class TaskProgressProcessor:
         return self.content
 
 
-agent_deployment_url = getenv("AGENT_DEPLOYMENT_URL") or ""
-agent_deployment_token = getenv("AGENT_DEPLOYMENT_TOKEN") or "dummy"
+agent_deployment_url = str(getenv("AGENT_DEPLOYMENT_URL") or "")
+agent_deployment_token = str(getenv("AGENT_DEPLOYMENT_TOKEN") or "dummy")
 AGENT_MODEL_NAME = "ttmdocs-agents"
 
 
@@ -633,56 +635,68 @@ async def _send_chat_completion(
         )
 
     provider = model.split("/")[0] if "/" in model else model
-    logger.info(
-        "LLM chat started",
-        extra={"model": model, "turn_id": str(message_uuid), "chat_id": str(chat_id)},
-    )
-    with _tracer.start_as_current_span(f"gen_ai.chat {model}") as span:
-        span.set_attribute("gen_ai.operation.name", "chat")
-        span.set_attribute("gen_ai.request.model", model)
-        span.set_attribute("gen_ai.provider.name", provider)
-        span.set_attribute("server.address", urlparse(api_base).hostname or api_base)
-        span.set_attribute("gen_ai.prompt", message)
-        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
-        span.set_attribute("datarobot.turn_id", str(message_uuid))
-        span.set_attribute("datarobot.user_id", str(auth_ctx.user.id))
-        if chat_id:
-            span.set_attribute("gen_ai.conversation.id", str(chat_id))
-        completion = await litellm.acompletion(
-            messages=messages,
-            model=_normalize_model_id(model),
-            api_base=api_base,
-            extra_headers=get_extra_headers(request),
+    with track_chat_request(model=model):
+        logger.info(
+            "LLM chat started",
+            extra={
+                "model": model,
+                "turn_id": str(message_uuid),
+                "chat_id": str(chat_id),
+            },
         )
-        # Extract message content from LiteLLM response
-        llm_message_content = completion["choices"][0]["message"]["content"] or ""
-        span.set_attribute("gen_ai.completion", llm_message_content)
-        span.set_attribute(
-            "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+        with _tracer.start_as_current_span(f"gen_ai.chat {model}") as span:
+            span.set_attribute("gen_ai.operation.name", "chat")
+            span.set_attribute("gen_ai.request.model", model)
+            span.set_attribute("gen_ai.provider.name", provider)
+            span.set_attribute(
+                "server.address", urlparse(api_base).hostname or api_base
+            )
+            span.set_attribute("gen_ai.prompt", message)
+            span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+            span.set_attribute("datarobot.turn_id", str(message_uuid))
+            dr_ctx_dict = (
+                auth_ctx.metadata.get("dr_ctx", {}) if auth_ctx.metadata else {}
+            )
+            dr_user_id = dr_ctx_dict.get("user_id")
+            if dr_user_id:
+                span.set_attribute("datarobot.user_id", str(dr_user_id))
+            if chat_id:
+                span.set_attribute("gen_ai.conversation.id", str(chat_id))
+            completion = await litellm.acompletion(
+                messages=messages,
+                model=_normalize_model_id(model),
+                api_base=api_base,
+                extra_headers=get_extra_headers(request),
+            )
+            # Extract message content from LiteLLM response
+            llm_message_content = completion["choices"][0]["message"]["content"] or ""
+            span.set_attribute("gen_ai.completion", llm_message_content)
+            span.set_attribute(
+                "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+            )
+            if hasattr(completion, "usage") and completion.usage:
+                token_attrs = {
+                    "gen_ai.request.model": model,
+                    "gen_ai.provider.name": provider,
+                }
+                prompt_tokens = getattr(completion.usage, "prompt_tokens", None)
+                if prompt_tokens is not None:
+                    span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
+                    _token_counter().add(
+                        prompt_tokens,
+                        {**token_attrs, "gen_ai.token.type": "input"},
+                    )
+                completion_tokens = getattr(completion.usage, "completion_tokens", None)
+                if completion_tokens is not None:
+                    span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
+                    _token_counter().add(
+                        completion_tokens,
+                        {**token_attrs, "gen_ai.token.type": "output"},
+                    )
+        logger.info(
+            "LLM chat completed",
+            extra={"model": model, "turn_id": str(message_uuid)},
         )
-        if hasattr(completion, "usage") and completion.usage:
-            token_attrs = {
-                "gen_ai.request.model": model,
-                "gen_ai.provider.name": provider,
-            }
-            prompt_tokens = getattr(completion.usage, "prompt_tokens", None)
-            if prompt_tokens is not None:
-                span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
-                _token_counter().add(
-                    prompt_tokens,
-                    {**token_attrs, "gen_ai.token.type": "input"},
-                )
-            completion_tokens = getattr(completion.usage, "completion_tokens", None)
-            if completion_tokens is not None:
-                span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
-                _token_counter().add(
-                    completion_tokens,
-                    {**token_attrs, "gen_ai.token.type": "output"},
-                )
-    logger.info(
-        "LLM chat completed",
-        extra={"model": model, "turn_id": str(message_uuid)},
-    )
     update_model = MessageUpdate(content=llm_message_content, in_progress=False)
     updated_message = await message_repo.update_message(
         uuid=message_uuid,
@@ -801,73 +815,114 @@ async def _send_chat_agent_completion(
 
     agent_provider = llm_model.split("/")[0] if "/" in llm_model else llm_model
     agent_api_base = str(agent_kwargs.get("api_base", ""))
-    logger.info(
-        "Agent chat started",
-        extra={
-            "model": llm_model,
-            "turn_id": str(message_uuid),
-            "chat_id": str(chat_id),
-        },
-    )
-    with _tracer.start_as_current_span(f"gen_ai.agent {llm_model}") as span:
-        span.set_attribute("gen_ai.operation.name", "chat")
-        span.set_attribute("gen_ai.request.model", llm_model)
-        span.set_attribute("gen_ai.provider.name", agent_provider)
-        span.set_attribute(
-            "server.address", urlparse(agent_api_base).hostname or agent_api_base
+    with track_chat_request(model=llm_model):
+        logger.info(
+            "Agent chat started",
+            extra={
+                "model": llm_model,
+                "turn_id": str(message_uuid),
+                "chat_id": str(chat_id),
+            },
         )
-        span.set_attribute("gen_ai.prompt", request_data.get("message", ""))
-        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
-        span.set_attribute("datarobot.turn_id", str(message_uuid))
-        span.set_attribute("datarobot.user_id", str(auth_ctx.user.id))
-        if chat_id:
-            span.set_attribute("gen_ai.conversation.id", str(chat_id))
-        processor = TaskProgressProcessor()
+        with _tracer.start_as_current_span(f"gen_ai.agent {llm_model}") as span:
+            span.set_attribute("gen_ai.operation.name", "chat")
+            span.set_attribute("gen_ai.request.model", llm_model)
+            span.set_attribute("gen_ai.provider.name", agent_provider)
+            span.set_attribute(
+                "server.address", urlparse(agent_api_base).hostname or agent_api_base
+            )
+            span.set_attribute("gen_ai.prompt", request_data.get("message", ""))
+            span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+            span.set_attribute("datarobot.turn_id", str(message_uuid))
+            dr_ctx_dict = (
+                auth_ctx.metadata.get("dr_ctx", {}) if auth_ctx.metadata else {}
+            )
+            dr_user_id = dr_ctx_dict.get("user_id")
+            if dr_user_id:
+                span.set_attribute("datarobot.user_id", str(dr_user_id))
+            if chat_id:
+                span.set_attribute("gen_ai.conversation.id", str(chat_id))
+            processor = TaskProgressProcessor()
+            usage_payload: Any | None = None
 
-        async for chunk in await litellm.acompletion(
-            messages=messages,
-            stream=True,
-            timeout=600,
-            extra_headers=get_extra_headers(request),
-            **agent_kwargs,
-        ):
-            if hasattr(chunk, "choices") and chunk.choices:
-                delta = chunk.choices[0].delta
-                # Check for error signaled via refusal field (set by datarobot-genai)
-                if hasattr(delta, "refusal") and delta.refusal == "error":
-                    error_msg = delta.content or "Agent error with no error message"
-                    logger.error(
-                        "Agent streaming error signaled via refusal field: %s",
-                        error_msg,
+            async for chunk in await litellm.acompletion(
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+                timeout=600,
+                extra_headers=get_extra_headers(request),
+                **agent_kwargs,
+            ):
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage_payload = chunk.usage
+                if hasattr(chunk, "choices") and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    # Check for error signaled via refusal field (set by datarobot-genai)
+                    if hasattr(delta, "refusal") and delta.refusal == "error":
+                        error_msg = delta.content or "Agent error with no error message"
+                        logger.error(
+                            "Agent streaming error signaled via refusal field: %s",
+                            error_msg,
+                        )
+                        raise Exception(error_msg)
+                    if hasattr(delta, "content") and delta.content:
+                        content = delta.content
+                        if not isinstance(content, str):
+                            logger.warning(
+                                "Received non-string content in streaming delta: %s (type: %s)",
+                                content,
+                                type(content).__name__,
+                            )
+                            continue
+
+                        task_progress = processor.process_content(content)
+                        if task_progress and chat_id:
+                            stream_manager.publish(
+                                chat_id,
+                                TaskProgressEvent(data=task_progress),
+                            )
+
+            llm_message_content = processor.flush()
+            span.set_attribute("gen_ai.completion", llm_message_content)
+            span.set_attribute(
+                "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+            )
+            # Extract token usage from streaming response
+            if usage_payload:
+                token_attrs = {
+                    "gen_ai.request.model": llm_model,
+                    "gen_ai.provider.name": agent_provider,
+                }
+                if isinstance(usage_payload, dict):
+                    prompt_tokens = usage_payload.get("prompt_tokens")
+                    completion_tokens = usage_payload.get("completion_tokens")
+                else:
+                    prompt_tokens = getattr(usage_payload, "prompt_tokens", None)
+                    completion_tokens = getattr(
+                        usage_payload, "completion_tokens", None
                     )
-                    raise Exception(error_msg)
-                if hasattr(delta, "content") and delta.content:
-                    content = delta.content
-                    if not isinstance(content, str):
-                        logger.warning(
-                            "Received non-string content in streaming delta: %s (type: %s)",
-                            content,
-                            type(content).__name__,
-                        )
-                        continue
+                if prompt_tokens is not None:
+                    span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
+                    _token_counter().add(
+                        prompt_tokens,
+                        {**token_attrs, "gen_ai.token.type": "input"},
+                    )
+                if completion_tokens is not None:
+                    span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
+                    _token_counter().add(
+                        completion_tokens,
+                        {**token_attrs, "gen_ai.token.type": "output"},
+                    )
+            else:
+                logger.warning(
+                    "No usage payload in agent streaming response; token usage attributes not set",
+                    extra={"model": llm_model, "turn_id": str(message_uuid)},
+                )
 
-                    task_progress = processor.process_content(content)
-                    if task_progress and chat_id:
-                        stream_manager.publish(
-                            chat_id,
-                            TaskProgressEvent(data=task_progress),
-                        )
-
-        llm_message_content = processor.flush()
-        span.set_attribute("gen_ai.completion", llm_message_content)
-        span.set_attribute(
-            "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+        logger.info(
+            "Agent chat completed",
+            extra={"model": llm_model, "turn_id": str(message_uuid)},
         )
-
-    logger.info(
-        "Agent chat completed",
-        extra={"model": llm_model, "turn_id": str(message_uuid)},
-    )
     update_model = MessageUpdate(
         content=llm_message_content,
         in_progress=False,
@@ -1036,15 +1091,17 @@ async def create_chat(
 
     chat_repo = request.app.state.deps.chat_repo
     message_repo = request.app.state.deps.message_repo
-    new_chat: Chat = await chat_repo.create_chat(
-        ChatCreate(name="New Chat", user_uuid=current_user.uuid)
-    )
+    db: DBCtx = request.app.state.deps.db
+    async with db.session_scope():
+        new_chat: Chat = await chat_repo.create_chat(
+            ChatCreate(name="New Chat", user_uuid=current_user.uuid)
+        )
+
+        _, response_message = await _create_new_message_exchange(
+            message_repo, new_chat.uuid, model, message
+        )
 
     stream_manager: ChatStreamManager = request.app.state.stream_manager
-
-    _, response_message = await _create_new_message_exchange(
-        message_repo, new_chat.uuid, model, message
-    )
     chat_completion_task = _get_safe_completion_task(
         model, request, response_message.uuid, stream_manager, auth_ctx
     )
@@ -1140,6 +1197,7 @@ async def create_chat_messages(
 
     chat_repo = request.app.state.deps.chat_repo
     message_repo = request.app.state.deps.message_repo
+    db: DBCtx = request.app.state.deps.db
 
     # Check if chat exists
     chat = await chat_repo.get_chat(chat_uuid)
@@ -1148,9 +1206,10 @@ async def create_chat_messages(
 
     stream_manager: ChatStreamManager = request.app.state.stream_manager
 
-    created_messages = await _create_new_message_exchange(
-        message_repo, chat.uuid, model, message
-    )
+    async with db.session_scope():
+        created_messages = await _create_new_message_exchange(
+            message_repo, chat.uuid, model, message
+        )
     for msg in created_messages:
         if msg.chat_id:
             stream_manager.publish(

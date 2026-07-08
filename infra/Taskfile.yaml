@@ -24,7 +24,7 @@ vars:
       if [ -n "${PULUMI_DATAROBOT_PLUGIN_VERSION:-}" ]; then
         echo "${PULUMI_DATAROBOT_PLUGIN_VERSION}"
       else
-        echo "v0.10.30"
+        echo "v0.10.36"
       fi
 
   PULUMI_DATAROBOT_DEFAULT_URL:
@@ -35,7 +35,7 @@ vars:
       if [ -n "${PULUMI_DATAROBOT_DEFAULT_URL:-}" ]; then
         echo "${PULUMI_DATAROBOT_DEFAULT_URL}"
       else
-        echo "https://github.com/datarobot-community/pulumi-datarobot/releases/download/v0.10.30"
+        echo "https://github.com/datarobot-community/pulumi-datarobot/releases/download/v0.10.36"
       fi
 
 tasks:
@@ -72,11 +72,44 @@ tasks:
           --server {{.PULUMI_DATAROBOT_DEFAULT_URL}}
         fi
 
-  install:
-    desc: "🔧 Install dependencies"
+  dr-experimentation-plugin-check:
+    silent: true
+    desc: "⬇️ Ensure DataRobot experimentation plugin is installed"
     cmds:
-      - echo "🔧 Installing dependencies.."
-      - "{{.UV_CMD}} sync --all-extras --dev"
+      - |
+        if command -v dr &> /dev/null; then
+          if dr plugin list 2>/dev/null | grep -qE '(^|[[:space:]])xp([[:space:]]|$)'; then
+            echo "ℹ️  DataRobot experimentation plugin 'xp' is already installed"
+            dr plugin update xp
+          else
+            echo "⬇️ Installing DataRobot experimentation plugin 'xp'"
+            dr plugin install xp || true
+          fi
+        else
+          echo "ℹ️  Skipping experimentation plugin check (dr CLI not available)"
+        fi
+
+  check-use-case-id:
+    silent: true
+    desc: "🔎 Ensure DATAROBOT_USE_CASE_ID is configured"
+    dir: ..
+    cmds:
+      - |
+        if [ ! -f pulumi_config.json ]; then
+          echo "❌ Missing pulumi_config.json in project root. Please run 'dr start' first to setup the project."
+          exit 1
+        fi
+
+        if command -v jq >/dev/null 2>&1; then
+          DATAROBOT_USE_CASE_ID="$(jq -r '.DATAROBOT_USE_CASE_ID // empty' pulumi_config.json)"
+        else
+          DATAROBOT_USE_CASE_ID="$(grep -Eo '"DATAROBOT_USE_CASE_ID"[[:space:]]*:[[:space:]]*"[^"]*"' pulumi_config.json | sed -E 's/.*"DATAROBOT_USE_CASE_ID"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/' | head -n 1)"
+        fi
+
+        if [ -z "${DATAROBOT_USE_CASE_ID}" ]; then
+          echo "❌ DATAROBOT_USE_CASE_ID is missing in pulumi_config.json. Please run 'dr start' first to setup the project."
+          exit 1
+        fi
 
   start:
     silent: true
@@ -84,7 +117,44 @@ tasks:
     deps:
       - auth-check
     cmds:
-      - task: deploy-dev
+      - task: deploy-dev-minimal
+      - task: dr-experimentation-plugin-check
+      - |
+        echo ""
+        echo "✅ Infrastructure deployed."
+        echo ""
+
+  deploy-dev-minimal:
+    silent: true
+    desc: "🔨 Deploy the minimal backend infrastructure (UseCase only) for local development"
+    deps:
+      - auth-check
+    cmds:
+      - task: pulumi-datarobot-plugin-check
+      - echo "🔨 Deploying the backend infrastructure.."
+      - |
+        export PULUMI_SKIP_UPDATE_CHECK=1 && {{.UV_CMD}} run pulumi up -y \
+          --target "**datarobot:index/useCase:UseCase**"
+  dev:
+    silent: true
+    dir: ../
+    desc: "📡 Start the local experimentation tracing dashboard (with experiment_container as the default entity-type)"
+    deps:
+      - check-use-case-id
+    cmds:
+      - |
+        if dr plugin list 2>/dev/null | grep -qE '(^|[[:space:]])xp([[:space:]]|$)'; then
+            DR_SKIP_PLUGIN_UPDATE_CHECK=true dr xp --plain-output
+          else
+            echo "DataRobot experimentation plugin not found. Please install it with 'dr plugin install xp' to use the tracing dashboard."
+            exit 1
+        fi
+
+  install:
+    desc: "🔧 Install dependencies"
+    cmds:
+      - echo "🔧 Installing dependencies.."
+      - "{{.UV_CMD}} sync --all-extras --dev"
 
   lint:
     silent: true
@@ -205,10 +275,14 @@ tasks:
     silent: true
     aliases: [up-dev]
     desc: "🔨 Deploy the backend infrastructure"
+    deps:
+      - auth-check
     cmds:
+      - task: pulumi-datarobot-plugin-check
       - echo "🔨 Deploying the backend infrastructure.."
       - |
-        uv run pulumi up \
+        export PULUMI_SKIP_UPDATE_CHECK=1 && {{.UV_CMD}} run pulumi up \
+          --target 'urn:pulumi:*::talk-to-my-docs::custom:datarobot:CustomModelDeployment::Talk to My Docs Agent Chat Deployment [*]' \
           --target 'urn:pulumi:*::talk-to-my-docs::datarobot:index/deployment:Deployment::Talk to My Docs LLM Blueprint Deployment [*]' \
           --target 'urn:pulumi:*::talk-to-my-docs::datarobot:index/predictionEnvironment:PredictionEnvironment::Talk to My Docs Prediction Environment [*]' \
           --target 'urn:pulumi:*::talk-to-my-docs::datarobot:index/useCase:UseCase::Talk to My Docs [*]' \

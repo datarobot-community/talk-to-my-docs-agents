@@ -462,6 +462,7 @@ async def test_chat_repository_delete_chat_success(sample_chat: Chat) -> None:
     mock_session = AsyncMock()
     mock_db = MagicMock()
     mock_db.session.return_value.__aenter__.return_value = mock_session
+    mock_db.commit = AsyncMock()
 
     mock_response = MagicMock()
     mock_response.first.return_value = sample_chat
@@ -473,7 +474,7 @@ async def test_chat_repository_delete_chat_success(sample_chat: Chat) -> None:
     assert result == sample_chat
     mock_session.exec.assert_called_once()
     mock_session.delete.assert_called_once_with(sample_chat)
-    mock_session.commit.assert_called_once()
+    mock_db.commit.assert_called_once_with(mock_session)
 
 
 @pytest.mark.asyncio

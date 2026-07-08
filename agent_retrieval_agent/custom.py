@@ -15,7 +15,7 @@
 # THIS SECTION OF CODE IS REQUIRED TO SETUP TRACING AND TELEMETRY FOR THE AGENTS.
 # REMOVING THIS CODE WILL DISABLE ALL MONITORING, TRACING AND TELEMETRY.
 # isort: off
-from datarobot_genai.core.telemetry_agent import instrument
+from datarobot_genai.core.telemetry.agent import instrument
 
 instrument(framework="crewai")
 # ruff: noqa: E402
@@ -25,15 +25,19 @@ from agent import Config, custompy_adaptor
 # ------------------------------------------------------------------------------
 import asyncio
 import os
+import queue
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, AsyncGenerator, Iterator, Union
+from typing import Any, Iterator, Union
 
 from datarobot_genai.core.chat import (
     CustomModelChatResponse,
     CustomModelStreamingResponse,
     resolve_authorization_context,
     to_custom_model_chat_response,
-    to_custom_model_streaming_response,
+)
+from datarobot_genai.core.chat.completions import is_streaming
+from datarobot_genai.core.chat.responses import (
+    streaming_iterator_to_custom_model_streaming_response,
 )
 from openai.types.chat import CompletionCreateParams
 from openai.types.chat.completion_create_params import (
@@ -103,28 +107,66 @@ def chat(
     }
     completion_create_params["forwarded_headers"] = forwarded_headers
 
-    # Instantiate and invoke the agent
-    result = thread_pool_executor.submit(
-        event_loop.run_until_complete,
-        custompy_adaptor(completion_create_params),
-    ).result()
-
-    # Check if the result is a generator (streaming response)
-    if isinstance(result, AsyncGenerator):
-        # Streaming response
-        return to_custom_model_streaming_response(
-            thread_pool_executor,
-            event_loop,
-            result,  # type: ignore[arg-type]
-            model=completion_create_params.get("model"),
+    if is_streaming(completion_create_params):
+        return _run_streaming(
+            thread_pool_executor, event_loop, completion_create_params
         )
     else:
-        # Non-streaming response
-        response_text, pipeline_interactions, usage_metrics = result
-
+        result = thread_pool_executor.submit(
+            event_loop.run_until_complete,
+            custompy_adaptor(completion_create_params),
+        ).result()
+        response_text, pipeline_interactions, usage_metrics = result  # type: ignore[misc]
         return to_custom_model_chat_response(
             response_text,
             pipeline_interactions,
             usage_metrics,  # type: ignore[arg-type]
             model=completion_create_params.get("model"),
         )
+
+
+def _run_streaming(
+    thread_pool_executor: ThreadPoolExecutor,
+    event_loop: asyncio.AbstractEventLoop,
+    completion_create_params: CompletionCreateParams,
+) -> Iterator[CustomModelStreamingResponse]:
+    """Run the agent in streaming mode using a queue-based sync/async bridge.
+
+    The entire async pipeline (agent creation, MCP context, streaming iteration)
+    runs within a single ``run_until_complete`` call — i.e. one asyncio Task.
+    Events are pushed to a thread-safe queue and consumed synchronously on the
+    calling thread. This avoids the cross-task cancel-scope errors that occur
+    when driving an async generator with repeated ``run_until_complete(anext(...))``
+    calls.
+    """
+    sync_queue: queue.Queue[Any] = queue.Queue()
+    _SENTINEL = object()
+
+    async def _drain_to_queue() -> None:
+        try:
+            async_gen = await custompy_adaptor(completion_create_params)
+            async for item in async_gen:  # type: ignore[union-attr]
+                sync_queue.put(item)
+        except BaseException as exc:
+            sync_queue.put(exc)
+        finally:
+            sync_queue.put(_SENTINEL)
+
+    future = thread_pool_executor.submit(
+        event_loop.run_until_complete, _drain_to_queue()
+    )
+
+    def _sync_event_iterator() -> Iterator[Any]:
+        while True:
+            item = sync_queue.get()
+            if item is _SENTINEL:
+                break
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+        future.result()
+
+    return streaming_iterator_to_custom_model_streaming_response(
+        _sync_event_iterator(),
+        model=completion_create_params.get("model"),
+    )

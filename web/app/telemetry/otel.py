@@ -55,12 +55,15 @@ from opentelemetry.sdk.metrics.view import ExponentialBucketHistogramAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import Span
 from typing_extensions import ParamSpec, Self, TypeVar
 
 from app.telemetry.logging import RedactingFormatter
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+
+    from app.config import Config
 
 # Optional imports for auto-instrumentation
 try:
@@ -76,7 +79,7 @@ except ImportError:
 try:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 except ImportError:
-    HTTPXClientInstrumentor = None
+    HTTPXClientInstrumentor = None  # type: ignore[assignment, misc]
 
 try:
     from opentelemetry.instrumentation.logging import LoggingInstrumentor
@@ -142,6 +145,24 @@ class OTLPConnectionErrorFilter(logging.Filter):
             if "ConnectionError" in message and ":4318" in message:
                 should_suppress = True
 
+        # Suppress opentelemetry SDK export errors caused by connection failures
+        if (
+            not should_suppress
+            and record.name.startswith("opentelemetry.sdk.")
+            and record.levelno == logging.ERROR
+        ):
+            if record.exc_info:
+                exc = record.exc_info[1]
+                while exc is not None:
+                    if type(exc).__name__ in (
+                        "ConnectionError",
+                        "NewConnectionError",
+                        "MaxRetryError",
+                    ):
+                        should_suppress = True
+                        break
+                    exc = exc.__cause__ or exc.__context__
+
         if should_suppress:
             if self.warning_callback:
                 self.warning_callback()
@@ -158,6 +179,9 @@ class OTel:
     Implements singleton pattern to ensure only one instance exists per process.
     """
 
+    _SERVICE_PRIORITY = "p1"
+    _METRIC_EXPORT_INTERVAL_MILLIS = 5_000
+
     _instance: Optional[OTel] = None
     _initialized: bool = False
     _auto_instrumentation_setup: bool = False
@@ -172,69 +196,72 @@ class OTel:
     def __init__(
         self, entity_type: str = "custom_application", entity_id: Optional[str] = None
     ):
-        # Only initialize once
         if self._initialized:
             return
 
         self.entity_type = entity_type
         self.entity_id = entity_id or os.environ.get("APPLICATION_ID")
 
-        # Telemetry enabled by default, disabled in local dev (start scripts set DISABLE_TELEMETRY=true)
-        self.telemetry_enabled = os.environ.get("DISABLE_TELEMETRY") != "true"
-
-        # Auto-disable telemetry if OTLP endpoint is not configured
-        if self.telemetry_enabled and not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-            # Check if internal endpoint is set (fallback)
-            if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT_INTERNAL"):
-                self.telemetry_enabled = False
-                logging.getLogger(__name__).warning(
-                    "OTEL_EXPORTER_OTLP_ENDPOINT not set. Disabling telemetry to prevent connection errors."
-                )
-
-        # Fail loudly if a remote endpoint is set but auth headers are missing — requests will be rejected.
-        # Skip this check for localhost endpoints (local collectors don't require auth).
-        _endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-        _is_remote = (
-            _endpoint and "localhost" not in _endpoint and "127.0.0.1" not in _endpoint
-        )
-        if (
-            self.telemetry_enabled
-            and _is_remote
-            and not os.environ.get("OTEL_EXPORTER_OTLP_HEADERS")
-        ):
-            self.telemetry_enabled = False
-            logging.getLogger(__name__).error(
-                "OTEL_EXPORTER_OTLP_ENDPOINT is set to a remote URL but OTEL_EXPORTER_OTLP_HEADERS is missing. "
-                "All telemetry requests will be rejected (401). Disabling telemetry. "
-                "Run scripts/create_tracing_shell.sh to get the required credentials, "
-                "then add OTEL_EXPORTER_OTLP_HEADERS to your .env file."
-            )
+        self.telemetry_enabled = False
 
         self._logger_provider: Optional[LoggerProvider] = None
         self._meter_provider: Optional[MeterProvider] = None
         self._tracer_provider: Optional[TracerProvider] = None
         self._resource: Optional[Resource] = None
         self._configured: bool = False
-        self._startup_logged: bool = False  # Track if startup has been logged
-        self._otlp_warning_logged: bool = (
-            False  # Track if OTLP connection warning has been logged
-        )
+        self._startup_logged: bool = False
+        self._otlp_warning_logged: bool = False
 
-        # Install filter to suppress OTLP connection errors from spamming logs
-        # We keep this even if telemetry is disabled, just in case something tries to force it
         self._install_otlp_error_filter()
 
-        # Setup auto-instrumentation on first init
-        if not self._auto_instrumentation_setup:
+        self._initialized = True
+
+    def configure(self, config: Config) -> None:
+        """Apply OTel settings from app Config. Call once during app startup."""
+        # Mirror config values into os.environ so OTLP exporters (which read env vars
+        # directly at construction time) use the endpoint configured via pulumi_config.json
+        # rather than falling back to localhost:4318.
+        if config.otel_exporter_otlp_endpoint:
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
+                config.otel_exporter_otlp_endpoint
+            )
+        if config.otel_exporter_otlp_headers:
+            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = config.otel_exporter_otlp_headers
+
+        self.telemetry_enabled = not config.otel_sdk_disabled
+
+        if self.telemetry_enabled and not config.otel_exporter_otlp_endpoint:
+            if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT_INTERNAL"):
+                self.telemetry_enabled = False
+                logging.getLogger(__name__).warning(
+                    "OTEL_EXPORTER_OTLP_ENDPOINT not set. Disabling telemetry to prevent connection errors."
+                )
+
+        _endpoint = config.otel_exporter_otlp_endpoint
+        _is_remote = (
+            _endpoint and "localhost" not in _endpoint and "127.0.0.1" not in _endpoint
+        )
+        if (
+            self.telemetry_enabled
+            and _is_remote
+            and not config.otel_exporter_otlp_headers
+        ):
+            self.telemetry_enabled = False
+            logging.getLogger(__name__).error(
+                "OTEL_EXPORTER_OTLP_ENDPOINT is set to a remote URL but OTEL_EXPORTER_OTLP_HEADERS is missing. "
+                "All telemetry requests will be rejected (401). Disabling telemetry. "
+                "Run `dr start` to get the required credentials, "
+                "then add OTEL_EXPORTER_OTLP_HEADERS to your .env file."
+            )
+
+        if self.telemetry_enabled and not self._auto_instrumentation_setup:
             self._setup_auto_instrumentation()
             self._auto_instrumentation_setup = True
-
-        self._initialized = True
 
     def _get_resource(self) -> Resource:
         if self._resource is None:
             attrs: dict[str, str] = {
-                "datarobot.service.priority": "p1",
+                "datarobot.service.priority": self._SERVICE_PRIORITY,
             }
             # Only set service.name if the platform hasn't already provided OTEL_SERVICE_NAME.
             # Resource.create() merges env vars at lower precedence than explicit attrs, so
@@ -263,6 +290,16 @@ class OTel:
         # Apply to requests logger
         requests_logger = logging.getLogger("requests")
         requests_logger.addFilter(otlp_filter)
+
+        # Apply to opentelemetry SDK export loggers.
+        # Names must match __name__ in the SDK modules: metrics and logs use
+        # the _internal path; traces use the public path.
+        for sdk_logger_name in (
+            "opentelemetry.sdk._logs._internal.export",
+            "opentelemetry.sdk.trace.export",
+            "opentelemetry.sdk.metrics._internal.export",
+        ):
+            logging.getLogger(sdk_logger_name).addFilter(otlp_filter)
 
     def _log_otlp_warning(self) -> None:
         """Log a warning about OTLP connection failure (only once)."""
@@ -422,7 +459,7 @@ class OTel:
             # Create metric reader
             reader = PeriodicExportingMetricReader(
                 exporter=otlp_exporter,
-                export_interval_millis=30000,
+                export_interval_millis=self._METRIC_EXPORT_INTERVAL_MILLIS,
             )
 
             # Create meter provider
@@ -478,8 +515,6 @@ class OTel:
         self.configure_logging()
         self.configure_metrics()
         self.configure_tracing()
-
-        # Note: Automatic instrumentation not needed for basic telemetry
 
         self._configured = True
 
@@ -591,22 +626,39 @@ class OTel:
     @overload
     def trace(self: Self, func: Callable[P, T]) -> Callable[P, T]: ...
 
+    @overload
+    def trace(self: Self, name: str) -> Callable[[Any], Any]: ...
+
     @no_type_check
     def trace(self: Self, func: Any) -> Any:
         """
-        Wrap the execution of the decorated function in an OTEL span sharing the same name as the function.
+        Wrap the execution of the decorated function in an OTEL span.
+
+        Accepts an optional custom span name::
+
+            @otel.trace
+            async def my_handler(): ...
+
+            @otel.trace("custom-operation-name")
+            async def my_handler(): ...
+
         WARNING: There are sharp edges with this decorator if applied to functions that are reflected on.
         (I've seen this with methods in utils.rest_api.)
         """
-        tracer = self.get_tracer("application-tracer")
+        if isinstance(func, str):
+            return functools.partial(self._trace_with_name, span_name=func)
+        return self._trace_with_name(func)
 
-        span_name = f"{func.__module__}.{func.__qualname__}"
+    @no_type_check
+    def _trace_with_name(self: Self, func: Any, span_name: Optional[str] = None) -> Any:
+        tracer = self.get_tracer("application-tracer")
+        name = span_name or f"{func.__module__}.{func.__qualname__}"
 
         if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_inner(*args, **kwargs):
-                with tracer.start_as_current_span(span_name):
+                with tracer.start_as_current_span(name):
                     return await func(*args, **kwargs)
 
             return async_inner
@@ -614,7 +666,7 @@ class OTel:
 
             @functools.wraps(func)
             async def inner_asyncgen(*args, **kwargs):
-                with tracer.start_as_current_span(span_name):
+                with tracer.start_as_current_span(name):
                     async for x in func(*args, **kwargs):
                         yield x
 
@@ -623,7 +675,7 @@ class OTel:
 
             @functools.wraps(func)
             def inner_gen(*args, **kwargs):
-                with tracer.start_as_current_span(span_name):
+                with tracer.start_as_current_span(name):
                     for x in func(*args, **kwargs):
                         yield x
 
@@ -632,13 +684,13 @@ class OTel:
 
             @functools.wraps(func)
             def inner(*args, **kwargs):
-                with tracer.start_as_current_span(span_name):
+                with tracer.start_as_current_span(name):
                     return func(*args, **kwargs)
 
             return inner
         else:
             raise ValueError(
-                f"instrument can only decorate a function type, while {span_name} is a {type(func)}."
+                f"instrument can only decorate a function type, while {name} is a {type(func)}."
             )
 
     @functools.cache
@@ -647,6 +699,24 @@ class OTel:
         return meter.create_histogram(
             f"function.{name}", "s", "A histogram recording function timings."
         )
+
+    @contextmanager
+    def span(self, name: str, **attributes: Any) -> Generator[Span, None, None]:
+        """Create a named span as a context manager, with optional initial attributes.
+
+        Use this for ad-hoc spans within a function body where a decorator
+        would be too coarse-grained::
+
+            with otel.span("retrieve-documents", query=query_text) as span:
+                docs = retrieve(query_text)
+                span.set_attribute("doc_count", len(docs))
+        """
+        with self.get_tracer("application-tracer").start_as_current_span(
+            name
+        ) as active_span:
+            for key, value in attributes.items():
+                active_span.set_attribute(key, value)
+            yield active_span
 
     @contextmanager
     def time(self, name: str) -> Generator[None, None, None]:
