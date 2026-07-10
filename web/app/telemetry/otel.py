@@ -566,12 +566,15 @@ class OTel:
         """
         Gracefully shutdown all telemetry providers.
         """
+        if not (self._logger_provider or self._meter_provider or self._tracer_provider):
+            return
+
         if self._logger_provider:
-            self._logger_provider.shutdown()  # type: ignore[no-untyped-call]
+            self._logger_provider.shutdown()
         if self._meter_provider:
             self._meter_provider.shutdown()
         if self._tracer_provider:
-            self._tracer_provider.shutdown()  # type: ignore[no-untyped-call]
+            self._tracer_provider.shutdown()
 
         # Allow time for final exports (as seen in datavolt examples)
         time.sleep(1)

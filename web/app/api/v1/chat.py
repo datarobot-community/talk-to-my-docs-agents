@@ -919,6 +919,17 @@ async def _send_chat_agent_completion(
                     extra={"model": llm_model, "turn_id": str(message_uuid)},
                 )
 
+            if not llm_message_content.strip():
+                # The upstream stream ended without ever producing content and without
+                # signaling an error via the refusal field (e.g. the connection was cut
+                # mid-stream by a worker timeout, or a malformed error event was dropped
+                # by the SSE parser). Raise so `_update_message_on_exception` surfaces a
+                # visible error instead of silently persisting an empty assistant message.
+                raise Exception(
+                    "Agent returned an empty response. The stream may have been "
+                    "interrupted before completion; please retry."
+                )
+
         logger.info(
             "Agent chat completed",
             extra={"model": llm_model, "turn_id": str(message_uuid)},

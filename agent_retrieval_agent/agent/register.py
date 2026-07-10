@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
+import os
 from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
@@ -22,6 +24,66 @@ from nat.builder.framework_enum import LLMFrameworkEnum
 from nat.cli.register_workflow import register_per_user_function
 from nat.data_models.agent import AgentBaseConfig
 from nat.data_models.component_ref import FunctionGroupRef
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_GUNICORN_WORKER_TIMEOUT_SECONDS = 600
+
+
+def _raise_gunicorn_worker_timeout() -> None:
+    """Raise gunicorn's default 30s worker timeout for the deployed dragent_fastapi front end.
+
+    ``nat dragent serve --use_gunicorn true`` (nvidia-nat's
+    ``FastApiFrontEndPluginWorker.run``) builds gunicorn's ``StandaloneApplication``
+    with a hardcoded options dict (``bind``/``workers``/``worker_class`` only) and
+    overrides ``load_config`` without calling ``super().load_config()``. That means
+    ``GUNICORN_CMD_ARGS``, a ``gunicorn.conf.py``, and a ``--timeout`` CLI flag are all
+    silently ignored — there is no supported way to raise gunicorn's default 30s worker
+    timeout for this front end today. A CrewAI hierarchical crew makes several
+    sequential LLM calls per turn and routinely exceeds 30s, so the worker gets
+    SIGABRT'd mid-stream and the client is left with a truncated/empty response.
+
+    Patching the ``Setting`` subclasses' class-level ``default`` before gunicorn's
+    ``Config()`` is instantiated changes what every subsequently created ``Timeout``/
+    ``GracefulTimeout`` setting defaults to, without needing a supported hook. This
+    module is a ``nat.plugins`` entry point, imported early enough in process startup —
+    well before ``dragent serve`` reaches gunicorn setup — for the patch to take
+    effect. Remove this once nvidia-nat exposes a real way to configure it.
+    """
+    try:
+        import gunicorn.config as gunicorn_config
+    except ImportError:
+        # gunicorn isn't installed/used in this serving mode (e.g. local dev via
+        # dev.py, or the DRUM fallback path) — nothing to patch.
+        return
+
+    # DataRobot's "numeric" runtime parameters surface as floats (e.g. "600.0"),
+    # so parse via float() before truncating to an int. Any exception here would
+    # abort loading the `crewai_agent` plugin entirely, taking down the whole agent,
+    # so a malformed override must never be allowed to raise.
+    raw_value = os.environ.get("AGENT_GUNICORN_WORKER_TIMEOUT")
+    try:
+        timeout_seconds = (
+            int(float(raw_value))
+            if raw_value
+            else DEFAULT_GUNICORN_WORKER_TIMEOUT_SECONDS
+        )
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid AGENT_GUNICORN_WORKER_TIMEOUT=%r, falling back to %ss",
+            raw_value,
+            DEFAULT_GUNICORN_WORKER_TIMEOUT_SECONDS,
+        )
+        timeout_seconds = DEFAULT_GUNICORN_WORKER_TIMEOUT_SECONDS
+
+    gunicorn_config.Timeout.default = timeout_seconds
+    gunicorn_config.GracefulTimeout.default = timeout_seconds
+    logger.info(
+        "Raised gunicorn worker/graceful timeout defaults to %ss", timeout_seconds
+    )
+
+
+_raise_gunicorn_worker_timeout()
 
 # INSTRUMENTATION CALL IS REQUIRED TO SETUP TRACING AND TELEMETRY FOR AGENTS
 instrument(framework="crewai")

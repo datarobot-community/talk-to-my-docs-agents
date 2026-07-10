@@ -513,8 +513,8 @@ def test_custom_model_created(monkeypatch):
 
     runtime_parameter_values = kwargs["runtime_parameter_values"]
 
-    # Should have 6 params: 1 SESSION_SECRET_KEY + 5 DRUM params
-    assert len(runtime_parameter_values) == 6
+    # Should have 7 params: 1 SESSION_SECRET_KEY + 5 DRUM params + AGENT_GUNICORN_WORKER_TIMEOUT
+    assert len(runtime_parameter_values) == 7
 
     # Find the SESSION_SECRET_KEY parameter
     session_secret_param = next(

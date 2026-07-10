@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.10.2] - 2026-07-10
+
+### Fixed
+
+- Made the agent worker timeout configurable to prevent premature worker termination.
+
 
 ## [11.10.0] - 2026-07-06
 

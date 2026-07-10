@@ -78,6 +78,12 @@ DEFAULT_AGENT_DEPLOYMENT_MAX_COMPUTES: Final[int] = 4 if ENABLE_AGENT_HA_MODE el
 # Default gunicorn timeout in current DRUM is 2 mins
 DEFAULT_DRUM_CLIENT_REQUEST_TIMEOUT: Final[str] = "300"
 
+# Gunicorn worker timeout for the `dragent` server (read directly by
+# agent/register.py, since `nat dragent serve` has no --timeout flag and
+# ignores GUNICORN_CMD_ARGS/gunicorn.conf.py). A CrewAI hierarchical crew makes several
+# sequential LLM calls per turn, so this needs to be well above gunicorn's 30s default.
+DEFAULT_AGENT_GUNICORN_WORKER_TIMEOUT: Final[str] = "600"
+
 # DRUM runtime parameters that are safe to include defaultValue in metadata
 DRUM_PARAMS_WITH_DEFAULTS: Final[set[str]] = {
     "CUSTOM_MODEL_WORKERS",
@@ -85,6 +91,7 @@ DRUM_PARAMS_WITH_DEFAULTS: Final[set[str]] = {
     "DRUM_GUNICORN_WORKER_CLASS",
     "DRUM_WORKER_CONNECTIONS",
     "DRUM_CLIENT_REQUEST_TIMEOUT",
+    "AGENT_GUNICORN_WORKER_TIMEOUT",
 }
 
 EXCLUDE_PATTERNS = [
@@ -570,6 +577,11 @@ agent_runtime_parameter_values.extend(
             key="DRUM_CLIENT_REQUEST_TIMEOUT",
             type="numeric",
             value=DEFAULT_DRUM_CLIENT_REQUEST_TIMEOUT,
+        ),
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+            key="AGENT_GUNICORN_WORKER_TIMEOUT",
+            type="numeric",
+            value=DEFAULT_AGENT_GUNICORN_WORKER_TIMEOUT,
         ),
     ]
 )
