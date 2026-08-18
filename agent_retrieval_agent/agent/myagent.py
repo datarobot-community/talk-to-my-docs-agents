@@ -111,6 +111,12 @@ class MyAgent(CrewAIAgent):
         self.config = Config()
         self.default_model = self.config.llm_default_model
         self.knowledge_base_files: dict[str, dict[str, str]] = {}
+        # A persistent list mutated in place (never reassigned) so the search tool,
+        # which captures this reference at crew-build time, always sees the current
+        # chunks even if the crew is built before make_kickoff_inputs runs. Empty
+        # means "no semantic chunks" (fall back to keyword), mirroring
+        # knowledge_base_files' in-place cache-safety.
+        self._semantic_chunks: list[dict[str, Any]] = []
         self._crew: Optional[Crew] = None
 
     # The datarobot-genai CrewAIAgent base eagerly mutates a *cached* set of crew
@@ -199,17 +205,23 @@ class MyAgent(CrewAIAgent):
             self._extract_and_store_knowledge_base_content(base)
             if "topic" not in inputs and "description" in base:
                 inputs["topic"] = base["description"]
-            if not self.knowledge_base_files:
+            if not self.knowledge_base_files and not self._semantic_chunks:
                 logger.warning(
                     "make_kickoff_inputs: knowledge_base key present but no files with "
-                    "encoded_content were extracted — routing will skip Knowledge Base Agent."
+                    "encoded_content or semantic_chunks were extracted — routing will "
+                    "skip Knowledge Base Agent."
                 )
         else:
             logger.info(
                 "make_kickoff_inputs: no knowledge_base in inputs, routing to other Agents."
             )
+        # The Knowledge Base Agent is viable when we have EITHER full encoded
+        # content (keyword/regex search path) OR pre-computed semantic chunks
+        # (vector-DB path, where chat strips encoded_content and sends only the
+        # top-ranked chunks). Gating on knowledge_base_files alone would skip the
+        # agent — and therefore the semantic chunks — in the VDB path.
         inputs["knowledge_base_available"] = (
-            "true" if self.knowledge_base_files else "false"
+            "true" if (self.knowledge_base_files or self._semantic_chunks) else "false"
         )
         logger.info(
             "make_kickoff_inputs: knowledge_base_available=%s",
@@ -234,7 +246,10 @@ class MyAgent(CrewAIAgent):
     @property
     def knowledge_base_search_tool(self) -> KnowledgeBaseSearchTool:
         """Returns the KnowledgeBaseSearchTool instance."""
-        return KnowledgeBaseSearchTool(knowledge_base=self.knowledge_base_files)
+        return KnowledgeBaseSearchTool(
+            knowledge_base=self.knowledge_base_files,
+            semantic_chunks=self._semantic_chunks,
+        )
 
     @property
     def agent_file_searcher(self) -> Agent:
@@ -311,6 +326,10 @@ class MyAgent(CrewAIAgent):
 
                 When selecting files, only use the 'uuid' key — never owner_uuid or project_uuid.
                 Always search first using keywords or regex before fetching full content.
+                If the search tool returns search_mode='semantic', the 'semantic_chunks' ARE the
+                relevant content: answer the question directly and ONLY from those chunks, and do
+                NOT call the content tool. If the chunks do not contain the answer, say the
+                documents do not cover it — never invent or generalize beyond the provided text.
                 Never call the content tool with an empty list.
                 Never call the content tool more than once.
                 If no UUIDs are found, respond that no relevant files were identified.
@@ -406,6 +425,12 @@ class MyAgent(CrewAIAgent):
 
     def _extract_and_store_knowledge_base_content(self, base: dict[str, Any]) -> None:
         """Extracts and stores the encoded content from knowledge base files."""
+        # Mutate the shared list in place (do not reassign) so a search tool built
+        # before this runs still observes the chunks.
+        self._semantic_chunks.clear()
+        chunks = base.get("semantic_chunks")
+        if chunks:
+            self._semantic_chunks.extend(chunks)
         for file_info in base["files"]:
             file_uuid = file_info["uuid"]
             if "encoded_content" in file_info:
@@ -421,8 +446,9 @@ class MyAgent(CrewAIAgent):
         Cached so that callers which configure the crew before invoking it (e.g.
         the dragent entrypoint setting ``agent.crew.stream = True``) mutate the
         same instance that ``invoke`` later runs. The knowledge-base tools hold a
-        reference to ``self.knowledge_base_files``, which is mutated in place by
-        ``make_kickoff_inputs``, so caching does not stale the KB contents.
+        reference to ``self.knowledge_base_files`` and ``self._semantic_chunks``,
+        both mutated in place by ``make_kickoff_inputs``, so caching does not stale
+        the KB contents or the semantic chunks.
 
         ``stream=True`` so ``invoke`` can stream the manager's synthesized answer to
         the user token-by-token (first token arrives long before the full multi-agent

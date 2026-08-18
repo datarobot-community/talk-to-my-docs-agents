@@ -128,6 +128,19 @@ def create_app(
         try:
             async with create_deps(config, deps) as dependencies:
                 app.state.deps = dependencies
+                # Indexing runs as in-process background tasks, so a crash/redeploy
+                # could leave a KB stuck in "indexing". Reset any such KBs to
+                # "failed" on startup so they're actionable instead of hung.
+                try:
+                    from app.knowledge_bases.indexer import reset_stuck_indexing
+
+                    await reset_stuck_indexing(
+                        dependencies.db, config.vdb_stuck_index_minutes
+                    )
+                except Exception:
+                    logger.warning(
+                        "reset_stuck_indexing failed at startup", exc_info=True
+                    )
                 yield
         finally:
             otel.shutdown()
@@ -189,6 +202,11 @@ def create_app(
             "BASE_PATH": app_base_url,
             "API_PORT": api_port,
             "DATAROBOT_ENDPOINT": os.getenv("DATAROBOT_ENDPOINT", ""),
+            # Whether the semantic-search feature is available (controls the
+            # per-KB mode toggle in the UI).
+            "VDB_ENABLED": "true"
+            if request.app.state.deps.vector_store is not None
+            else "false",
         }
 
         manifest_assets = get_manifest_assets(

@@ -22,6 +22,18 @@ export function getApiUrl() {
     return `${window.location.origin}${getBaseUrl()}api`;
 }
 
+/**
+ * Whether the semantic-search (VDB) feature is available for this deployment.
+ *
+ * The backend injects "true"/"false" into window.ENV, but this also accepts "1"
+ * and mixed case so a hand-set value still works. Anything else, including an
+ * unset flag, leaves the feature off so it stays dark by default.
+ */
+export function isVdbEnabled(): boolean {
+    const raw = String(window.ENV?.VDB_ENABLED).toLowerCase();
+    return raw === 'true' || raw === '1';
+}
+
 export function unwrapMarkdownCodeBlock(message: string): string {
     return message.replace(/```(?:markdown)?\s*/g, '\n').replace(/<think>[\s\S]*?<\/think>/g, '');
 }

@@ -12,27 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-This LLM configuration option is useful when you already have an LLM Deployed.
-It will pull it into the playground and use case. It isn't sufficient if you
-have a registered model you would like added to an LLM Blueprint and deployed.
-For that, you'll need to choose the "registered_model_llm.py" option
+Choose this option when you already have a DataRobot LLM deployment and its deployment ID.
+It attaches that existing deployment to the playground and use case. If instead you have a
+registered model that needs to be wrapped in an LLM Blueprint and deployed, choose the
+"registered_model.py" option.
 """
 
 import os
-from datarobot_pulumi_utils.pulumi import export
-from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
+
 import pulumi
 import pulumi_datarobot as datarobot
+from datarobot_pulumi_utils.pulumi import export
+from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 
 from . import use_case
 from .libllm import (
+    DEPLOYED_LLM_PLACEHOLDER_MODEL,
+    ensure_datarobot_prefix,
     validate_feature_flags,
     verify_llm,
 )
 
 __all__ = [
-    "custom_model_runtime_parameters",
     "app_runtime_parameters",
+    "custom_model_runtime_parameters",
     "default_model",
     "llm_application_name",
     "llm_resource_name",
@@ -49,12 +52,13 @@ LLM_DEPLOYMENT_ID = os.environ["LLM_DEPLOYMENT_ID"]
 
 llm_application_name: str = "llm"
 llm_resource_name: str = "[llm]"
-default_model: str = os.environ.get(
-    "LLM_DEFAULT_MODEL", "datarobot/datarobot-deployed-llm"
+# This existing deployment routes by its deployment ID; the model string is only a label
+# (the endpoint ignores it), so it defaults to an inert placeholder. Set
+# LLM_DEFAULT_MODEL to the real model name if you want datarobot-genai to
+# match provider-specific reasoning parameters.
+default_model: str = ensure_datarobot_prefix(
+    os.environ.get("LLM_DEFAULT_MODEL", DEPLOYED_LLM_PLACEHOLDER_MODEL)
 )
-
-if not default_model.startswith("datarobot/"):
-    default_model = f"datarobot/{default_model}"
 
 # Verify everything is working
 validate_feature_flags(REQUIRED_FEATURE_FLAGS)

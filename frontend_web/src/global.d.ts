@@ -7,6 +7,7 @@ declare global {
         ENV: {
             BASE_PATH?: string;
             API_PORT?: string;
+            VDB_ENABLED?: string;
         };
     }
 }

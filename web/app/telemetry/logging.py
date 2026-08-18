@@ -46,7 +46,10 @@ class JsonFormatter(logging.Formatter):
             str, Union[Callable[[logging.LogRecord], Any], Any]
         ] = {
             "timestamp": lambda _: datetime.now(timezone.utc).isoformat(),
-            "level": lambda record: record.levelname,
+            # The DataRobot OTel collector's severity_parser only reads "levelname"
+            # (matching platform services' JSON logs) - it never looked for "level",
+            # so every JSON log line from this formatter was silently defaulted to INFO.
+            "levelname": lambda record: record.levelname,
             "logger": lambda record: record.name,
         }
 
@@ -138,6 +141,7 @@ class RedactingFormatter(logging.Formatter):
     sensitive_keys: list[str] = [
         "access_token",
         "refresh_token",
+        "api_key",
     ]
 
     def __init__(self, original_formatter: logging.Formatter):
@@ -205,7 +209,7 @@ class RedactingFormatter(logging.Formatter):
 
 def init_logging(
     level: LogLevel = LogLevel.INFO,
-    format_type: FormatType = "text",
+    format_type: FormatType = "json",
     stream: Any = sys.stdout,
 ) -> None:
     """
@@ -217,7 +221,11 @@ def init_logging(
 
     Args:
         level: The minimum logging level (e.g., logging.INFO, 'DEBUG').
-        format_type: The format type to use ('json' or 'text').
+        format_type: The format type to use ('json' or 'text'). Defaults to 'json':
+            the OTel collector's recombine heuristic splits multi-line plaintext
+            records apart (any line not starting with whitespace starts a new
+            record), which mislabels continuation lines as INFO and lets them
+            bypass level filtering. A single-line JSON record has no such lines.
         stream: The stream to write logs to (defaults to stdout).
     """
     root_logger = logging.getLogger()
@@ -249,7 +257,7 @@ def get_logger(
     name: str = "",
     level: LogLevel = LogLevel.INFO,
     stream: Any = sys.stdout,
-    format_type: FormatType = "text",
+    format_type: FormatType = "json",
 ) -> logging.Logger:
     """
     Get a configured logger instance.
@@ -258,7 +266,8 @@ def get_logger(
         name: The name of the logger
         level: The logging level (can be int or string like 'INFO', 'DEBUG', etc.)
         stream: The stream to write logs to (defaults to stdout)
-        format_type: The format type to use ('json' or 'text', defaults to 'text')
+        format_type: The format type to use ('json' or 'text', defaults to 'json'
+            to match init_logging - see its docstring for why)
 
     Returns:
         A configured logger instance

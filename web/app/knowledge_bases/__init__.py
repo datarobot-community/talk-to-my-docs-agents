@@ -11,12 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import enum
 import logging
 import uuid as uuidpkg
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import JSON, Column, DateTime
 from sqlmodel import Field, Relationship, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -27,6 +28,33 @@ if TYPE_CHECKING:
     from app.users.user import User
 
 logger = logging.getLogger(__name__)
+
+
+class IndexStatus(str, enum.Enum):
+    NOT_INDEXED = "not_indexed"
+    INDEXING = "indexing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class RetrievalMode(str, enum.Enum):
+    # "keyword" reproduces the ORIGINAL behavior (full document content passed to
+    # the agent / keyword scan). "semantic" uses the DataRobot Memory API search.
+    KEYWORD = "keyword"
+    SEMANTIC = "semantic"
+
+
+def is_semantic_ready(kb: "KnowledgeBase") -> bool:
+    """True when a KB is in semantic mode and its index is READY.
+
+    Both chat retrieval and the /search endpoint gate on this so neither serves a
+    partially populated store during a rebuild (the full-replace deletes then
+    re-adds, so the index is incomplete until it lands READY).
+    """
+    return (
+        kb.retrieval_mode == RetrievalMode.SEMANTIC
+        and kb.index_status == IndexStatus.READY
+    )
 
 
 class KnowledgeBase(SQLModel, table=True):
@@ -49,6 +77,29 @@ class KnowledgeBase(SQLModel, table=True):
     token_count: int = Field(default=0, ge=0)
     path: str = Field(..., min_length=1, max_length=500)
     is_public: bool = Field(default=False, nullable=False)
+    index_status: str = Field(default=IndexStatus.NOT_INDEXED, max_length=20)
+    # Per-KB retrieval mode. Defaults to KEYWORD so existing KBs (and any KB when
+    # the feature is off) behave exactly as the app did originally.
+    retrieval_mode: str = Field(default=RetrievalMode.KEYWORD, max_length=16)
+    indexed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    # Last indexing error (surfaced to ops/UI when index_status == failed).
+    # Vectors live in the DataRobot Memory API keyed by this KB's id, so no
+    # per-KB vector-store resource ids are stored on the row.
+    last_error: str | None = Field(default=None, max_length=2000)
+    # sha256 over the KB's current document set. When a rebuild computes the same
+    # fingerprint and the KB is already READY, re-embedding is skipped (no-op
+    # rebuild). None until first indexed.
+    index_fingerprint: str | None = Field(default=None, max_length=64)
+    # Per-document content SHA map {doc_id: sha}, tracked locally because the
+    # Memory API cannot be enumerated (50-result cap). Drives incremental
+    # indexing: only docs whose sha changed (or were removed) are touched.
+    index_doc_shas: dict[str, str] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default="{}"),
+    )
 
     # Relationships
     owner_id: int = Field(foreign_key="user.id")
@@ -69,6 +120,7 @@ class KnowledgeBaseCreate(SQLModel):
     path: str | None = Field(default=None, min_length=1, max_length=500)
     token_count: int = Field(default=0, ge=0)
     is_public: bool = Field(default=False)
+    retrieval_mode: str = Field(default=RetrievalMode.KEYWORD, max_length=16)
 
 
 class KnowledgeBaseUpdate(SQLModel):
@@ -79,6 +131,7 @@ class KnowledgeBaseUpdate(SQLModel):
     path: str | None = Field(default=None, min_length=1, max_length=500)
     token_count: int | None = Field(default=None, ge=0)
     is_public: bool | None = Field(default=None)
+    retrieval_mode: str | None = Field(default=None, max_length=16)
 
 
 class KnowledgeBaseRepository:
@@ -138,6 +191,7 @@ class KnowledgeBaseRepository:
             owner_id=owner_id,
             path=knowledge_base_data.path or "",  # Temporary placeholder
             is_public=knowledge_base_data.is_public,
+            retrieval_mode=knowledge_base_data.retrieval_mode,
         )
 
         async with self._db.session(writable=True) as session:

@@ -53,11 +53,24 @@ def mock_dr_client() -> Generator[MagicMock, None, None]:
 
 @pytest.fixture
 def mock_litellm_completion() -> Generator[MagicMock, None, None]:
-    """Fixture for successful litellm completion."""
+    """Fixture for a successful (streaming) litellm completion.
+
+    The fast grounded chat path streams (``async for chunk in await acompletion``),
+    so the mock resolves to an async iterator of delta chunks that accumulate to
+    "test".
+    """
     with patch("litellm.acompletion") as mock_acompletion:
 
-        async def _mock_acompletion(*args: Any, **kwargs: Any) -> dict[str, Any]:
-            return {"choices": [{"message": {"role": "assistant", "content": "test"}}]}
+        async def _mock_acompletion(*args: Any, **kwargs: Any) -> Any:
+            async def _stream() -> Any:
+                chunk = MagicMock()
+                chunk.usage = None
+                chunk.choices = [MagicMock()]
+                chunk.choices[0].delta.content = "test"
+                chunk.choices[0].delta.refusal = None
+                yield chunk
+
+            return _stream()
 
         mock_acompletion.side_effect = _mock_acompletion
         yield mock_acompletion

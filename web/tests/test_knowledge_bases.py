@@ -141,6 +141,42 @@ def test_knowledge_base_creation_validation(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_create_knowledge_base_rejects_invalid_retrieval_mode(
+    authenticated_client: TestClient,
+) -> None:
+    """An explicit invalid retrieval_mode is rejected with 422, not silently
+    coerced to a default (which could enable semantic mode + billable indexing)."""
+    response = authenticated_client.post(
+        "/api/v1/knowledge-bases/",
+        json={"title": "T", "description": "D", "retrieval_mode": "magic"},
+    )
+    assert response.status_code == 422
+    assert "retrieval_mode" in response.text
+
+
+def test_resolve_retrieval_mode_normalizes_and_validates() -> None:
+    """None -> configured default (normalized against the enum); invalid explicit
+    -> ValueError; feature-off always forces keyword."""
+    import pytest
+
+    from app.api.v1.knowledge_bases import _resolve_retrieval_mode as R
+    from app.knowledge_bases import RetrievalMode as RM
+
+    # Unset resolves to the configured default when the feature is on.
+    assert R(None, feature_on=True, config_default=RM.SEMANTIC) == RM.SEMANTIC
+    assert R(None, feature_on=True, config_default=RM.KEYWORD) == RM.KEYWORD
+    # A misconfigured default (typo) is normalized to keyword, never an invalid mode.
+    assert R(None, feature_on=True, config_default="sematic") == RM.KEYWORD
+    # Feature off always forces keyword, regardless of default or explicit value.
+    assert R(None, feature_on=False, config_default=RM.SEMANTIC) == RM.KEYWORD
+    assert R("semantic", feature_on=False, config_default=RM.KEYWORD) == RM.KEYWORD
+    # Explicit valid choice is honored when the feature is on.
+    assert R("semantic", feature_on=True, config_default=RM.KEYWORD) == RM.SEMANTIC
+    # Explicit invalid value raises (the endpoint turns this into a 422).
+    with pytest.raises(ValueError):
+        R("magic", feature_on=True, config_default=RM.SEMANTIC)
+
+
 def test_update_knowledge_base_without_auth(client: TestClient) -> None:
     test_uuid = str(uuidpkg.uuid4())
     response = client.put(f"/api/v1/knowledge-bases/{test_uuid}", json={"title": "New"})
@@ -231,3 +267,24 @@ def test_update_knowledge_base_forbidden(
         f"/api/v1/knowledge-bases/{kb_uuid}", json={"title": "New"}
     )
     assert r.status_code == 403
+
+
+from app.knowledge_bases import IndexStatus  # noqa: E402
+
+
+def test_index_status_default_is_not_indexed() -> None:
+    kb = KnowledgeBase(
+        title="t",
+        description="d",
+        path="p",
+        owner_id=1,
+    )
+    assert kb.index_status == IndexStatus.NOT_INDEXED
+    assert kb.indexed_at is None
+
+
+def test_index_status_enum_values() -> None:
+    assert IndexStatus.NOT_INDEXED == "not_indexed"
+    assert IndexStatus.INDEXING == "indexing"
+    assert IndexStatus.READY == "ready"
+    assert IndexStatus.FAILED == "failed"

@@ -44,6 +44,7 @@ export const KnowledgeBaseFormPage = () => {
                 name: existingKnowledgeBase.title,
                 description: existingKnowledgeBase.description,
                 is_public: existingKnowledgeBase.is_public, // Default to private for existing bases
+                retrieval_mode: existingKnowledgeBase.retrieval_mode,
             });
         } else if (!isEditing && !isManaging) {
             // Clear form for new knowledge base creation
@@ -63,6 +64,7 @@ export const KnowledgeBaseFormPage = () => {
                     title: formData.name,
                     description: formData.description,
                     is_public: formData.is_public,
+                    retrieval_mode: formData.retrieval_mode,
                 };
                 await updateKnowledgeBaseMutation.mutateAsync({
                     baseUuid: knowledgeBaseUuid,
@@ -77,6 +79,7 @@ export const KnowledgeBaseFormPage = () => {
                     description: formData.description,
                     token_count: 0,
                     is_public: formData.is_public,
+                    retrieval_mode: formData.retrieval_mode,
                 };
                 const newBase = await createKnowledgeBaseMutation.mutateAsync(createData);
                 // Navigate to file management for the new base

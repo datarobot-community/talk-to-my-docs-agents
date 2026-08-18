@@ -45,6 +45,12 @@ export const useListKnowledgeBases = () => {
         queryKey: knowledgeBasesKeys.all,
         queryFn: ({ signal }) => listKnowledgeBases(signal),
         staleTime: 60000, // Use 1 minute, we have invalidate calls when item is changed/deleted
+        // Poll while any KB is indexing so the "Indexing…" indicator clears on its
+        // own; otherwise rely on staleTime + invalidations.
+        refetchInterval: query => {
+            const bases = query.state.data ?? [];
+            return bases.some(b => b.index_status === 'indexing') ? 4000 : false;
+        },
     });
 };
 

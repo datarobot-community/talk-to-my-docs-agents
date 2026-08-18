@@ -64,6 +64,10 @@ class FileListTool(BaseTool):
         span = trace.get_current_span()
         span.set_attribute("gen_ai.tool.call.arguments", "{}")
         span.set_attribute("gen_ai.tool.call.result", json.dumps(files))
+        # Return an empty list (not an error) when no sample documents exist, so the
+        # agent cleanly reports "no files available" instead of raising — a raised
+        # tool error otherwise gets surfaced to the manager, which may paper over it
+        # by inventing content.
         return files
 
 
@@ -212,9 +216,13 @@ class KnowledgeBaseSearchTool(BaseTool):
     )
     args_schema: Type[BaseModel] = KnowledgeBaseSearchToolSchema
     knowledge_base: dict[str, dict[str, str]] = dict()
+    semantic_chunks: Optional[List[dict[str, Any]]] = None
 
     def __init__(
-        self, knowledge_base: dict[str, dict[str, str]] | None = None, **kwargs: Any
+        self,
+        knowledge_base: dict[str, dict[str, str]] | None = None,
+        semantic_chunks: Optional[List[dict[str, Any]]] = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initializes the KnowledgeBaseSearchTool with a knowledge base.
@@ -223,6 +231,7 @@ class KnowledgeBaseSearchTool(BaseTool):
         # We want to keep the reference to the original dictionary if it is anything but None
         # so that it can get updated with new objects
         self.knowledge_base = knowledge_base if knowledge_base is not None else dict()
+        self.semantic_chunks = semantic_chunks
 
     def _run(
         self,
@@ -237,6 +246,27 @@ class KnowledgeBaseSearchTool(BaseTool):
             "gen_ai.tool.call.arguments",
             json.dumps({"keywords": keywords, "regex_pattern": regex_pattern}),
         )
+        # Return pre-computed semantic chunks if available. An empty list means
+        # semantic search produced no hits, so fall through to keyword search on
+        # the raw files (consistent with the truthiness routing gate in
+        # make_kickoff_inputs, which also treats [] as "no semantic chunks").
+        if self.semantic_chunks:
+            result: dict[str, Any] = {
+                "search_mode": "semantic",
+                "semantic_chunks": self.semantic_chunks,
+                "note": (
+                    "These are the most relevant excerpts from the knowledge base, "
+                    "ranked by similarity to the question. Answer the user's question "
+                    "using ONLY the text in 'semantic_chunks'. Do not use outside "
+                    "knowledge or invent details. If the answer is not contained in "
+                    "these excerpts, say the documents do not contain that information. "
+                    "Do not call the content tool — these excerpts are the content."
+                ),
+            }
+            span.set_attribute(
+                "gen_ai.tool.call.result", json.dumps(result)[:_TOOL_RESULT_MAX_CHARS]
+            )
+            return result
         # Validate inputs
         if not keywords and not regex_pattern:
             return {

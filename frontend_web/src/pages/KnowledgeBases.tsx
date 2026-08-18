@@ -5,6 +5,8 @@ import { Edit, Trash2, FileText, Calendar, EllipsisVertical } from 'lucide-react
 import noBasesPreview from '@/assets/no_bases_preview.svg';
 import noBasesPreviewLight from '@/assets/no_bases_preview_light.svg';
 import { Button } from '@/components/ui/button.tsx';
+import { Badge } from '@/components/ui/badge';
+import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ROUTES } from './routes';
 import {
@@ -30,6 +32,7 @@ import {
 import { Heading } from '@/components/ui/heading';
 import { useTheme } from '@/theme/theme-provider';
 import { useTranslation } from '@/lib/i18n';
+import { isVdbEnabled } from '@/lib/ttmdocs-utils';
 
 export const KnowledgeBases = () => {
     const { t } = useTranslation();
@@ -37,6 +40,8 @@ export const KnowledgeBases = () => {
     const { data: knowledgeBase = [], isLoading, error } = useListKnowledgeBases();
     const deleteBaseMutation = useDeleteKnowledgeBase();
     const [deletingBaseId, setDeletingBaseId] = useState<string | null>(null);
+    // Only surface the search-mode label / indexing indicator when the feature is on.
+    const vdbEnabled = isVdbEnabled();
     const { theme } = useTheme();
     const handleDeleteBase = async (baseUuid: string) => {
         if (
@@ -165,6 +170,54 @@ export const KnowledgeBases = () => {
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
+                            {vdbEnabled && (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <Badge
+                                        data-testid="kb-mode-badge"
+                                        type="outline"
+                                        variant={
+                                            base.retrieval_mode === 'semantic' ? 'info' : 'default'
+                                        }
+                                    >
+                                        {base.retrieval_mode === 'semantic'
+                                            ? t('Semantic search')
+                                            : t('Keyword match')}
+                                    </Badge>
+                                    {base.retrieval_mode === 'semantic' &&
+                                        base.index_status === 'indexing' && (
+                                            <Badge data-testid="kb-status-badge" variant="warning">
+                                                <Spinner className="mr-1 size-3" />
+                                                {t('Indexing…')}
+                                            </Badge>
+                                        )}
+                                    {base.retrieval_mode === 'semantic' &&
+                                        base.index_status === 'ready' && (
+                                            <Badge data-testid="kb-status-badge" variant="success">
+                                                {t('Ready')}
+                                            </Badge>
+                                        )}
+                                    {base.retrieval_mode === 'semantic' &&
+                                        base.index_status === 'failed' && (
+                                            <TooltipProvider>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Badge
+                                                            data-testid="kb-status-badge"
+                                                            variant="destructive"
+                                                        >
+                                                            {t('Indexing failed')}
+                                                        </Badge>
+                                                    </TooltipTrigger>
+                                                    {base.last_error && (
+                                                        <TooltipContent className="max-w-xs wrap-break-word whitespace-normal">
+                                                            {base.last_error}
+                                                        </TooltipContent>
+                                                    )}
+                                                </Tooltip>
+                                            </TooltipProvider>
+                                        )}
+                                </div>
+                            )}
                             <CardAction>
                                 <DropdownMenu>
                                     <TooltipProvider>

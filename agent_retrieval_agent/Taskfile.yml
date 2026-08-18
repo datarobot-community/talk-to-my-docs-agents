@@ -174,7 +174,7 @@ tasks:
         if [ -n "${ENTITY_ID:-}" ] && [ -n "${DATAROBOT_API_TOKEN:-}" ]; then
           export OTEL_EXPORTER_OTLP_HEADERS="x-datarobot-entity-id=${ENTITY_ID},x-datarobot-api-key=${DATAROBOT_API_TOKEN}"
         fi
-        (cd .. && DR_SKIP_PLUGIN_UPDATE_CHECK=true dr xp --plain-output) &
+        (cd .. && dr --skip-plugin-update-check xp --plain-output) &
         DR_XP_PID=$!
         trap "kill $DR_XP_PID 2>/dev/null || true" EXIT
         if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then

@@ -46,7 +46,7 @@ def calculate_token_count(encoded_content: dict[int, str]) -> int:
 
 async def get_or_create_encoded_content(
     file: "File",
-    file_repo: "FileRepository",
+    file_repo: "FileRepository | None" = None,
     knowledge_base: "KnowledgeBase | None" = None,
     knowledge_base_repo: "KnowledgeBaseRepository | None" = None,
 ) -> dict[int, str] | None:

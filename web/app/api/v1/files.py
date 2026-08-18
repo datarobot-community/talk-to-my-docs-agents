@@ -30,7 +30,14 @@ from core.persistent_fs.dr_file_system import get_file_system
 from datarobot.auth.oauth import OAuthToken
 from datarobot.auth.session import AuthCtx
 from datarobot.auth.typing import Metadata
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 
 from app.api.v1.schema import ErrorCodes, ErrorSchema
@@ -39,8 +46,9 @@ from app.files import File as DBFile
 from app.files import FileCreate, FileUpdate, get_or_create_encoded_content
 from app.files.models import FileRepository
 from app.knowledge_bases import KnowledgeBaseRepository
+from app.knowledge_bases.indexer import index_knowledge_base
 from app.users.identity import IdentityRepository, IdentityUpdate, ProviderType
-from app.users.user import UserRepository
+from app.users.user import User, UserRepository
 from core import document_loader
 
 logger = logging.getLogger(__name__)
@@ -92,6 +100,49 @@ class File(BaseModel):
     type: FileType
     name: str
     mime_type: str | None = None
+
+
+# Strong references to in-flight background index tasks. asyncio only holds a
+# weak reference to a task, so without this the GC can cancel a fire-and-forget
+# index mid-run, silently leaving a knowledge base un-indexed. Tasks remove
+# themselves on completion.
+_BACKGROUND_INDEX_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _schedule_kb_reindex(
+    request: Request,
+    knowledge_base_uuid: uuidpkg.UUID | None,
+    current_user: User,
+) -> None:
+    """Re-fetch the knowledge base (with its files) and schedule a full vector
+    re-index as a fire-and-forget background task.
+
+    Called after files are attached to a KB (any upload provider, or update_file).
+    No-op when there is no KB or no DataRobot VDB service is configured, so the
+    keyword-search fallback still works.
+    """
+    if knowledge_base_uuid is None:
+        return
+    deps = request.app.state.deps
+    vector_store = deps.vector_store
+    if vector_store is None:
+        return
+    kb = await deps.knowledge_base_repo.get_knowledge_base(
+        current_user, knowledge_base_uuid=knowledge_base_uuid
+    )
+    if kb is not None:
+        cfg = deps.config
+        task = asyncio.create_task(
+            index_knowledge_base(
+                kb,
+                deps.db,
+                vector_store,
+                max_file_bytes=cfg.vdb_max_file_mb * 1024 * 1024,
+                max_files=cfg.vdb_max_files,
+            )
+        )
+        _BACKGROUND_INDEX_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_INDEX_TASKS.discard)
 
 
 class FilesListSchema(BaseModel):
@@ -851,6 +902,14 @@ async def update_file(
     if not current_user:
         raise HTTPException(status_code=401, detail="User not found")
 
+    # Capture the KB the file belongs to *before* the update (eager-loaded, same as
+    # delete_file). If this update moves the file to a different KB or detaches it,
+    # the previous KB must be re-indexed too, or its chunks for this file keep being
+    # served by semantic search.
+    previous_kb_uuid: uuidpkg.UUID | None = (
+        file.knowledgebase.uuid if file.knowledgebase else None
+    )
+
     knowledge_base_id = None
     if payload.knowledge_base_uuid:
         knowledge_base_repo = request.app.state.deps.knowledge_base_repo
@@ -866,10 +925,19 @@ async def update_file(
             raise HTTPException(status_code=404, detail=err.model_dump())
         knowledge_base_id = knowledge_base.id
 
-    file_data = FileUpdate(
-        filename=payload.filename,
-        knowledge_base_id=knowledge_base_id,
-    )
+    # Only carry over fields the caller actually sent. FileUpdate is applied with
+    # model_dump(exclude_unset=True), and an explicitly-passed None still counts as
+    # set, so always passing knowledge_base_id would make a filename-only rename
+    # silently detach the file from its knowledge base (and, with the re-index
+    # below, drop that file's chunks from the KB).
+    payload_set = payload.model_dump(exclude_unset=True)
+    kb_attachment_changed = "knowledge_base_uuid" in payload_set
+    update_fields: dict[str, Any] = {}
+    if "filename" in payload_set:
+        update_fields["filename"] = payload.filename
+    if kb_attachment_changed:
+        update_fields["knowledge_base_id"] = knowledge_base_id
+    file_data = FileUpdate.model_validate(update_fields)
 
     # Add null check for file.id
     if not file.id:
@@ -889,6 +957,17 @@ async def update_file(
             message="Failed to update file or access denied",
         )
         raise HTTPException(status_code=403, detail=err.model_dump())
+
+    # Re-index only when the attachment actually changed (a rename leaves both KBs'
+    # chunks valid). Rebuilds the new KB through the shared scheduler, which applies
+    # the configured max-file-size/max-files guards and task-retention bookkeeping.
+    if kb_attachment_changed:
+        await _schedule_kb_reindex(request, payload.knowledge_base_uuid, current_user)
+        # Also rebuild the KB the file left, so its now-stale chunks are dropped.
+        if previous_kb_uuid is not None and previous_kb_uuid != (
+            payload.knowledge_base_uuid
+        ):
+            await _schedule_kb_reindex(request, previous_kb_uuid, current_user)
 
     return FileSchema.from_file(updated_file, owner_uuid=current_user.uuid)
 
@@ -917,6 +996,12 @@ async def delete_file(
         )
         raise HTTPException(status_code=404, detail=err.model_dump())
 
+    # Capture the owning KB (eager-loaded) before deletion so we can re-index it
+    # afterwards — otherwise the deleted document's chunks linger in the VDB.
+    kb_uuid: uuidpkg.UUID | None = (
+        file.knowledgebase.uuid if file.knowledgebase else None
+    )
+
     success = await file_repo.delete_file(file.id, owner_id=int(auth_ctx.user.id))
 
     if not success:
@@ -925,6 +1010,14 @@ async def delete_file(
             message="Failed to delete file or access denied",
         )
         raise HTTPException(status_code=403, detail=err.model_dump())
+
+    # Re-index the knowledge base so the deleted file's content is removed from
+    # the vector database (or the VDB is torn down if the KB is now empty).
+    if kb_uuid is not None:
+        user_repo: UserRepository = request.app.state.deps.user_repo
+        current_user = await user_repo.get_user(user_id=int(auth_ctx.user.id))
+        if current_user:
+            await _schedule_kb_reindex(request, kb_uuid, current_user)
 
     return {"message": "File deleted successfully"}
 
@@ -1210,6 +1303,10 @@ async def upload_drive_files(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=err.model_dump()
         )
 
+    # Only rebuild the KB's vectors if at least one file was actually stored; an
+    # all-failed batch would otherwise trigger a full, no-op re-embed of the KB.
+    if any(isinstance(r, FileSchema) for r in results):
+        await _schedule_kb_reindex(request, knowledge_base_uuid, current_user)
     return results
 
 
@@ -1442,6 +1539,10 @@ async def upload_box_files(
             )
             raise HTTPException(status_code=500, detail=err.model_dump())
 
+    # Only rebuild the KB's vectors if at least one file was actually stored; an
+    # all-failed batch would otherwise trigger a full, no-op re-embed of the KB.
+    if any(isinstance(r, FileSchema) for r in results):
+        await _schedule_kb_reindex(request, knowledge_base_uuid, current_user)
     return results
 
 
@@ -1710,6 +1811,10 @@ async def upload_sharepoint_files(
             )
             raise HTTPException(status_code=500, detail=err.model_dump())
 
+    # Only rebuild the KB's vectors if at least one file was actually stored; an
+    # all-failed batch would otherwise trigger a full, no-op re-embed of the KB.
+    if any(isinstance(r, FileSchema) for r in results):
+        await _schedule_kb_reindex(request, knowledge_base_uuid, current_user)
     return results
 
 
@@ -1846,4 +1951,8 @@ async def upload_local_files(
                 }
             )
 
+    # Only rebuild the KB's vectors if at least one file was actually stored; an
+    # all-failed batch would otherwise trigger a full, no-op re-embed of the KB.
+    if any(isinstance(r, FileSchema) for r in results):
+        await _schedule_kb_reindex(request, knowledge_base_uuid, current_user)
     return results

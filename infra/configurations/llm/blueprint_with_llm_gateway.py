@@ -19,16 +19,17 @@ and monitoring baked in.
 """
 
 import os
+
 import datarobot as dr
 import pulumi
 import pulumi_datarobot as datarobot
-
 from datarobot_pulumi_utils.pulumi import export
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
 
 from . import use_case
 from .libllm import (
+    ensure_datarobot_prefix,
     get_blueprint_runtime_parameters,
     validate_feature_flags,
     verify_llm,
@@ -36,8 +37,8 @@ from .libllm import (
 )
 
 __all__ = [
-    "custom_model_runtime_parameters",
     "app_runtime_parameters",
+    "custom_model_runtime_parameters",
     "default_model",
     "llm_application_name",
     "llm_resource_name",
@@ -58,11 +59,6 @@ REQUIRED_FEATURE_FLAGS = {
     "ENABLE_LLM_GCP_GEMINI_25_FLASH": True,
 }
 
-__all__ = [
-    "llm_application_name",
-    "llm_resource_name",
-]
-
 llm_application_name: str = "llm"
 llm_resource_name: str = "[llm]"
 # This is the model_id that the DataRobot LLM Gateway expects.
@@ -80,8 +76,8 @@ print("\n.   - ".join(
     ]
 ))
 """
-default_model: str = os.environ.get(
-    "LLM_DEFAULT_MODEL", "datarobot/azure/gpt-5-mini-2025-08-07"
+default_model: str = ensure_datarobot_prefix(
+    os.environ.get("LLM_DEFAULT_MODEL", "datarobot/azure/gpt-5-mini-2025-08-07")
 )
 default_llm_id: str = os.environ.get(
     "LLM_DEFAULT_LLM_ID",
@@ -204,7 +200,7 @@ custom_model_runtime_parameters = [
         value=llm_deployment.id,
     ),
     datarobot.CustomModelRuntimeParameterValueArgs(
-        key=llm_application_name.upper() + "_DEFAULT_MODEL",
+        key="LLM_DEFAULT_MODEL",
         type="string",
         value=default_model,
     ),

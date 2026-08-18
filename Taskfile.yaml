@@ -73,6 +73,11 @@ tasks:
     cmds:
       - dr task run test
 
+  nat-eval:
+    desc: "📊 Run NAT batch evaluation (pass eval config path as CLI_ARGS)"
+    cmds:
+      - dr task run eval -- {{.CLI_ARGS}}
+
   auth-check:
     silent: true
     desc: "🔐 Check authentication prerequisites"

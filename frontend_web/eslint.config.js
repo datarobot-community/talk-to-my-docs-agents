@@ -5,6 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 import i18next from 'eslint-plugin-i18next';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 import prettier from 'eslint-plugin-prettier';
 import prettierConfig from 'eslint-config-prettier';
 import eslintPluginBetterTailwindcss from 'eslint-plugin-better-tailwindcss';
@@ -13,6 +14,7 @@ export default defineConfig(
     eslint.configs.recommended,
     tseslint.configs.recommended,
     i18next.configs['flat/recommended'],
+    jsxA11y.flatConfigs.recommended,
     prettierConfig,
     { ignores: ['dist'] },
     {
@@ -82,6 +84,17 @@ export default defineConfig(
         files: ['src/lib/i18n/**/*.{ts,tsx}', 'src/main.tsx'],
         rules: {
             'no-restricted-imports': 'off',
+        },
+    },
+    {
+        // Test fixtures deliberately attach handlers to bare elements to assert event
+        // behaviour; they are not shipped UI. dr-ui and the design system relax the
+        // interaction rules under their own test globs.
+        files: ['tests/**/*.{ts,tsx}', '**/*.{test,spec}.{ts,tsx}'],
+        rules: {
+            'jsx-a11y/click-events-have-key-events': 'off',
+            'jsx-a11y/no-static-element-interactions': 'off',
+            'jsx-a11y/no-noninteractive-element-interactions': 'off',
         },
     }
 );

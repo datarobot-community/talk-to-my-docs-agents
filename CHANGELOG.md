@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [11.11.0] - 2026-08-18
+
+### Added
+
+- Semantic document retrieval via the DataRobot Memory API, grounded on pre-computed semantic chunks, with a per-knowledge-base semantic/keyword toggle, index-status indicator, and deploy-time runtime parameters.
+- Cross-session agent conversation memory, with a deploy-time runtime parameter to enable it.
+- Fast grounded chat path for semantic knowledge bases.
+- Version control for the xp plugin.
+- Accessibility tooling: ESLint accessibility linting for `frontend_web`.
+- Top-level `nat-eval` task for local NAT batch evaluation.
+
+### Changed
+
+- Indexing performance: larger chunks, batched adds, and configurable throughput knobs; per-document indexing is now incremental and non-destructive.
+- Synced component templates from upstream:
+  - af-component-base
+  - af-component-llm
+  - af-component-react
+  - af-component-fastapi-backend
+  - af-component-e2e-tests (failure-review pipeline support)
+- Updated `infra/uv.lock` for the `pulumi-datarobot` version bump.
+- Bumped CI action versions: `actions/setup-node` (6 → 7), `actions/setup-go` (6 → 7), `hadolint/hadolint-action` (3.3.0 → 3.4.0).
+
+### Fixed
+
+- Fixed `ENV_FILE` and `private_repo_name` handling in the e2e-tests component sync.
+
+
+### Security
+
+- Redacted `api_key` in log output.
+
 ## [11.10.3] - 2026-07-15
 
 ### Fixed

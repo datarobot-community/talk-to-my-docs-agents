@@ -40,6 +40,7 @@ from app.chats import Chat, ChatCreate, ChatRepository
 from app.config import Config
 from app.db import DBCtx
 from app.files.contents import get_or_create_encoded_content
+from app.knowledge_bases import RetrievalMode, is_semantic_ready
 from app.messages import Message, MessageCreate, MessageRepository, MessageUpdate, Role
 from app.streams import (
     ChatStreamManager,
@@ -133,6 +134,37 @@ def _otel_output_messages(content: str) -> str:
     return json.dumps(
         [{"role": "assistant", "parts": [{"type": "text", "content": content}]}]
     )
+
+
+def _capture_message_content() -> bool:
+    """Whether to record GenAI message *content* on spans.
+
+    Chat prompts/completions can carry user text and recalled personal memories
+    (location, preferences), so per the OTel GenAI semantic conventions this
+    content is gated behind OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT and
+    is off by default. Non-content metadata (model, provider, token counts, ids)
+    is always recorded regardless.
+    """
+    return (
+        str(getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "false"))
+        .strip()
+        .lower()
+        == "true"
+    )
+
+
+def _set_genai_input_content(span: Any, prompt: str, messages: list[Any]) -> None:
+    """Record input prompt/messages on the span only when content capture is on."""
+    if _capture_message_content():
+        span.set_attribute("gen_ai.prompt", prompt)
+        span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+
+
+def _set_genai_output_content(span: Any, completion: str) -> None:
+    """Record output completion/messages on the span only when capture is on."""
+    if _capture_message_content():
+        span.set_attribute("gen_ai.completion", completion)
+        span.set_attribute("gen_ai.output.messages", _otel_output_messages(completion))
 
 
 DATAROBOT_IDENTITY_HEADER_NAME = "X-DataRobot-Identity-Token"
@@ -533,16 +565,42 @@ def _get_safe_completion_task(
         async with _update_message_on_exception(
             request, message_uuid, stream_manager, model, config
         ):
-            if model == AGENT_MODEL_NAME:
-                await _send_chat_agent_completion(
+            kb_ready = await _kb_is_semantic_ready(request, auth_ctx)
+            if _should_use_direct_path(model, kb_ready):
+                await _send_chat_completion(
                     request, message_uuid, stream_manager, auth_ctx
                 )
             else:
-                await _send_chat_completion(
+                await _send_chat_agent_completion(
                     request, message_uuid, stream_manager, auth_ctx
                 )
 
     return task
+
+
+async def _kb_is_semantic_ready(
+    request: Request, auth_ctx: "AuthCtx[Metadata]"
+) -> bool:
+    """True if the request targets a semantic, READY knowledge base.
+
+    Used to route semantic-mode KB chats to the fast grounded path even when the
+    agent model is selected. Best-effort: any failure routes normally (False).
+    """
+    try:
+        data = await request.json()
+        kb_uuid = data.get("knowledge_base_id")
+        if not kb_uuid:
+            return False
+        deps = request.app.state.deps
+        current_user = await _get_current_user(deps.user_repo, int(auth_ctx.user.id))
+        kb = await _get_knowledge_base(
+            knowledge_base_uuid_str=kb_uuid,
+            knowledge_base_repo=deps.knowledge_base_repo,
+            current_user=current_user,
+        )
+        return bool(kb and is_semantic_ready(kb) and deps.vector_store is not None)
+    except Exception:
+        return False
 
 
 def get_extra_headers(request: Request) -> dict[str, str]:
@@ -555,6 +613,212 @@ def get_extra_headers(request: Request) -> dict[str, str]:
     propagate.inject(extra_headers)
 
     return extra_headers
+
+
+# Upper bound on how long recall may delay a chat response. The transport
+# retries transient errors with backoff, which is right for indexing but must
+# not stall an interactive request during a Memory API outage.
+_MEMORY_RECALL_TIMEOUT_S = 8.0
+
+# Strong references to fire-and-forget store tasks (asyncio only keeps weak
+# refs; without this a pending store could be garbage-collected mid-flight).
+_MEMORY_STORE_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _recall_and_store_memory(
+    request: Request,
+    current_user: "User",
+    turn_text: str,
+    request_type: str = "message",
+) -> str | None:
+    """Best-effort cross-session memory (DataRobot Memory API).
+
+    Returns recalled context to prepend to the prompt (or None), and persists this
+    user turn. Scoped per app user. Never raises into the chat flow.
+
+    Only real user turns (``request_type == "message"``) are recalled and stored.
+    Auto-generated "suggestion" prompts are skipped so they neither pollute durable
+    memory nor incur the store's server-side fact-extraction cost.
+
+    Recall is awaited with a short timeout (it feeds this response); the store is
+    fire-and-forget (its result is never used), so neither can stall the chat
+    when the Memory API is slow or down.
+    """
+    conversation_memory = request.app.state.deps.conversation_memory
+    if (
+        conversation_memory is None
+        or request_type != "message"
+        or not turn_text.strip()
+    ):
+        return None
+    user_id = str(current_user.uuid)
+
+    memories: list[str] = []
+    try:
+        memories = await asyncio.wait_for(
+            conversation_memory.retrieve(user_id, turn_text),
+            timeout=_MEMORY_RECALL_TIMEOUT_S,
+        )
+    except Exception:
+        logger.warning("memory recall unavailable; continuing", exc_info=True)
+
+    async def _store() -> None:
+        try:
+            await conversation_memory.store(user_id, turn_text)
+        except Exception:
+            logger.warning("memory store failed; turn not persisted", exc_info=True)
+
+    task = asyncio.create_task(_store())
+    _MEMORY_STORE_TASKS.add(task)
+    task.add_done_callback(_MEMORY_STORE_TASKS.discard)
+
+    if not memories:
+        return None
+    recalled = "\n".join(f"- {m}" for m in memories)
+    return "Relevant context about the user from earlier conversations:\n" + recalled
+
+
+async def _noop_chunks() -> list[dict[str, Any]]:
+    """Awaitable returning no chunks (used to keep gather() shapes uniform)."""
+    return []
+
+
+async def _retrieve_semantic_chunks(
+    request: Request,
+    knowledge_base: "KnowledgeBase",
+    query: str,
+) -> list[dict[str, Any]]:
+    """Top semantic chunks for a READY semantic-mode KB, or [] otherwise.
+
+    Best-effort: any failure returns [] so chat falls back to full content. Only
+    a semantic-mode KB whose index is READY is retrieved from (a mid-rebuild
+    store is partial and would answer confidently-wrong).
+    """
+    vector_store = request.app.state.deps.vector_store
+    if not (
+        vector_store
+        and knowledge_base.id
+        and query
+        and is_semantic_ready(knowledge_base)
+    ):
+        return []
+    try:
+        retrieved = await vector_store.retrieve(str(knowledge_base.uuid), query)
+        # Build the result inside the try so a malformed chunk (missing key,
+        # non-iterable result) also degrades to [] per the best-effort contract,
+        # rather than raising and cancelling the sibling recall coroutine.
+        return [
+            {
+                "text": c.get("text", ""),
+                "score": c.get("score"),
+                "source": c.get("source"),
+            }
+            for c in retrieved
+        ]
+    except Exception:
+        logger.warning(
+            "semantic retrieval failed for kb=%s; falling back to full content",
+            knowledge_base.uuid,
+            exc_info=True,
+        )
+        return []
+
+
+def _build_grounded_context(chunks: list[dict[str, Any]]) -> str:
+    """Render retrieved chunks into a grounding block for the system prompt."""
+    if not chunks:
+        return ""
+    lines = [
+        "Answer the question using ONLY the excerpts below, retrieved from the "
+        "user's documents. If the answer is not contained in them, say the "
+        "documents do not cover it. Cite the source filename when relevant.",
+        "",
+        "Excerpts:",
+    ]
+    for i, c in enumerate(chunks, 1):
+        src = c.get("source") or "unknown"
+        lines.append(f"[{i}] (source: {src})\n{c.get('text', '')}")
+    return "\n".join(lines)
+
+
+def _assemble_direct_messages(
+    system_prompt: str,
+    user_message: str,
+    grounded_context: str = "",
+    recalled: str | None = None,
+) -> list[dict[str, str]]:
+    """Build [system, user] messages, folding grounding + recall into system."""
+    sys_parts = [system_prompt]
+    if grounded_context:
+        sys_parts.append(grounded_context)
+    if recalled:
+        sys_parts.append(recalled)
+    return [
+        {"role": "system", "content": "\n\n".join(sys_parts)},
+        {"role": "user", "content": user_message},
+    ]
+
+
+def _should_use_direct_path(model: str, kb_is_semantic_ready: bool) -> bool:
+    """Direct grounded path when the model is non-agent OR the KB is semantic+ready.
+
+    A semantic, indexed KB overrides the agent model: retrieval already did the
+    search the crew would perform, so a single grounded call is used instead.
+    """
+    return model != AGENT_MODEL_NAME or kb_is_semantic_ready
+
+
+def _effective_direct_model(model: str, default_model: str) -> str:
+    """Resolve the LLM model for the direct path.
+
+    The agent deployment name is not a real LLM catalog model, so when a semantic
+    KB routes the agent model here, use the configured default LLM instead.
+    """
+    return default_model if model == AGENT_MODEL_NAME else model
+
+
+# Push partial answer content to the UI in modest increments rather than on every
+# token — bounds DB writes / SSE events while still feeling live.
+_STREAM_EMIT_CHARS = 48
+
+
+async def _consume_stream(
+    stream: Any,
+    *,
+    emit_chars: int,
+    on_partial: Callable[[str], Coroutine[Any, Any, None]],
+) -> Tuple[str, Any]:
+    """Consume a streaming chat completion.
+
+    Accumulates ``delta.content`` and invokes ``on_partial(accumulated_text)`` once
+    the content has grown by at least ``emit_chars`` since the last call, so the
+    caller can push incremental updates to the UI. Returns
+    ``(full_content, usage_payload)``. Raises if the stream signals an error via the
+    datarobot-genai ``refusal`` field.
+    """
+    parts: list[str] = []
+    usage: Any | None = None
+    last_emit = 0
+    async for chunk in stream:
+        if getattr(chunk, "usage", None):
+            usage = chunk.usage
+        choices = getattr(chunk, "choices", None)
+        if not choices:
+            continue
+        delta = choices[0].delta
+        if getattr(delta, "refusal", None) == "error":
+            raise RuntimeError(
+                getattr(delta, "content", None) or "LLM error with no message"
+            )
+        content = getattr(delta, "content", None)
+        if not isinstance(content, str) or not content:
+            continue
+        parts.append(content)
+        acc = "".join(parts)
+        if len(acc) - last_emit >= emit_chars:
+            last_emit = len(acc)
+            await on_partial(acc)
+    return "".join(parts), usage
 
 
 async def _send_chat_completion(
@@ -574,6 +838,12 @@ async def _send_chat_completion(
     file_ids_str = request_data.get("file_ids", [])
     knowledge_base_uuid_str = request_data.get("knowledge_base_id")
     request_type = request_data.get("type", "message")
+
+    config: Config = request.app.state.deps.config
+    # A semantic-mode KB routes even the agent model to this fast grounded path.
+    # The agent deployment name ("ttmdocs-agents") is not a real LLM catalog
+    # model, so fall back to the configured default LLM for the completion.
+    model = _effective_direct_model(model, config.llm_default_model)
 
     # Get repositories
     file_repo: FileRepository = request.app.state.deps.file_repo
@@ -604,24 +874,46 @@ async def _send_chat_completion(
     system_prompt = (
         SUGGESTIONS_PROMPT if request_type == "suggestion" else SYSTEM_PROMPT
     )
-    # Augment the message with file content if they exist
-    augmented_message = message
-    if combined_files:
-        augmented_message = await _augment_message_with_files(
-            message,
-            files=combined_files,
-            file_repo=file_repo,
-            knowledge_base=knowledge_base,
-            knowledge_base_repo=knowledge_base_repo,
-        )
+    # Cross-session memory recall and semantic retrieval are independent Memory
+    # API round-trips; run them concurrently to save a round-trip on the hot path.
+    recalled, chunks = await asyncio.gather(
+        _recall_and_store_memory(request, current_user, message, request_type),
+        _retrieve_semantic_chunks(request, knowledge_base, message)
+        if knowledge_base is not None
+        else _noop_chunks(),
+    )
 
-    # Create OpenAI messages
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": augmented_message},
-    ]
+    grounded_context = _build_grounded_context(chunks)
+    if grounded_context:
+        # Semantic path: the KB's documents are covered by the retrieved chunks, so
+        # don't inline them again. But user-uploaded files that are NOT part of the
+        # KB aren't in the vector store, so still inline those so their content
+        # isn't lost.
+        augmented_message = message
+        if files:
+            augmented_message = await _augment_message_with_files(
+                message,
+                files=files,
+                file_repo=file_repo,
+                knowledge_base=knowledge_base,
+                knowledge_base_repo=knowledge_base_repo,
+            )
+    else:
+        # Fallback: original behavior (full file / KB content in the message).
+        augmented_message = message
+        if combined_files:
+            augmented_message = await _augment_message_with_files(
+                message,
+                files=combined_files,
+                file_repo=file_repo,
+                knowledge_base=knowledge_base,
+                knowledge_base_repo=knowledge_base_repo,
+            )
 
-    config: Config = request.app.state.deps.config
+    messages = _assemble_direct_messages(
+        system_prompt, augmented_message, grounded_context, recalled
+    )
+
     logger.debug("Sending messages to LLM:\n%s", json.dumps(messages, indent=2))
 
     if config.llm_deployment_id:
@@ -651,8 +943,7 @@ async def _send_chat_completion(
             span.set_attribute(
                 "server.address", urlparse(api_base).hostname or api_base
             )
-            span.set_attribute("gen_ai.prompt", message)
-            span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+            _set_genai_input_content(span, message, messages)
             span.set_attribute("datarobot.turn_id", str(message_uuid))
             dr_ctx_dict = (
                 auth_ctx.metadata.get("dr_ctx", {}) if auth_ctx.metadata else {}
@@ -662,31 +953,54 @@ async def _send_chat_completion(
                 span.set_attribute("datarobot.user_id", str(dr_user_id))
             if chat_id:
                 span.set_attribute("gen_ai.conversation.id", str(chat_id))
-            completion = await litellm.acompletion(
+
+            async def _emit_partial(acc: str) -> None:
+                # Stream partial content to the UI as it is generated (persist +
+                # publish, same shape as the final update below) so the user sees
+                # the answer fill in instead of waiting for the whole completion.
+                if not chat_id:
+                    return
+                partial = await message_repo.update_message(
+                    uuid=message_uuid,
+                    update=MessageUpdate(content=acc, in_progress=True),
+                )
+                if partial:
+                    stream_manager.publish(
+                        chat_id,
+                        MessageEvent(data=partial.dump_json_compatible()),
+                    )
+
+            stream = await litellm.acompletion(
                 messages=messages,
                 model=_normalize_model_id(model),
                 api_base=api_base,
                 extra_headers=get_extra_headers(request),
+                stream=True,
+                stream_options={"include_usage": True},
             )
-            # Extract message content from LiteLLM response
-            llm_message_content = completion["choices"][0]["message"]["content"] or ""
-            span.set_attribute("gen_ai.completion", llm_message_content)
-            span.set_attribute(
-                "gen_ai.output.messages", _otel_output_messages(llm_message_content)
+            llm_message_content, usage_payload = await _consume_stream(
+                stream, emit_chars=_STREAM_EMIT_CHARS, on_partial=_emit_partial
             )
-            if hasattr(completion, "usage") and completion.usage:
+            _set_genai_output_content(span, llm_message_content)
+            if usage_payload:
                 token_attrs = {
                     "gen_ai.request.model": model,
                     "gen_ai.provider.name": provider,
                 }
-                prompt_tokens = getattr(completion.usage, "prompt_tokens", None)
+                if isinstance(usage_payload, dict):
+                    prompt_tokens = usage_payload.get("prompt_tokens")
+                    completion_tokens = usage_payload.get("completion_tokens")
+                else:
+                    prompt_tokens = getattr(usage_payload, "prompt_tokens", None)
+                    completion_tokens = getattr(
+                        usage_payload, "completion_tokens", None
+                    )
                 if prompt_tokens is not None:
                     span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
                     _token_counter().add(
                         prompt_tokens,
                         {**token_attrs, "gen_ai.token.type": "input"},
                     )
-                completion_tokens = getattr(completion.usage, "completion_tokens", None)
                 if completion_tokens is not None:
                     span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
                     _token_counter().add(
@@ -780,14 +1094,78 @@ async def _send_chat_agent_completion(
         "question": f"{augmented_message}",
     }
 
+    # Cross-session agent memory: prepend recalled facts to the question.
+    recalled = await _recall_and_store_memory(
+        request, current_user, request_data.get("message", ""), request_type
+    )
+    if recalled:
+        content["question"] = f"{recalled}\n\nQuestion: {content['question']}"
+
     # Add knowledge base to content if provided
-    if knowledge_base_schema:
-        content["knowledge_base"] = knowledge_base_schema.model_dump(mode="json")
+    if knowledge_base_schema and knowledge_base:
+        vector_store = request.app.state.deps.vector_store
+        user_message_text = request_data.get("message", "")
+
+        # Retrieve the most relevant chunks from the DataRobot Memory API (the query
+        # is embedded server-side and matched against the KB's stored chunks).
+        # Only when this KB is in semantic mode AND its index is READY: during a
+        # full-replace rebuild the store is partially populated, and answering
+        # from a partial chunk set would be confidently wrong — fall back to the
+        # full-content path instead. Keyword mode keeps the original behavior.
+        top_chunks: list[dict[str, Any]] = []
+        semantic = is_semantic_ready(knowledge_base)
+        if vector_store and knowledge_base.id and user_message_text and semantic:
+            try:
+                retrieved = await vector_store.retrieve(
+                    str(knowledge_base.uuid), user_message_text
+                )
+                top_chunks = [
+                    {
+                        "text": c["text"],
+                        "score": c["score"],
+                        "source": c["source"],
+                    }
+                    for c in retrieved
+                ]
+                logger.info(
+                    "VDB retrieval kb=%s: %d chunk(s) for query %r",
+                    knowledge_base.uuid,
+                    len(top_chunks),
+                    user_message_text[:80],
+                )
+            except Exception:
+                logger.warning(
+                    "VDB retrieval failed for kb=%s; falling back to full content",
+                    knowledge_base.uuid,
+                )
+                top_chunks = []
+        elif knowledge_base.retrieval_mode == RetrievalMode.SEMANTIC:
+            # Semantic KB but retrieval can't run (index building/failed, no
+            # store, or empty query) — full-content fallback below.
+            logger.info(
+                "VDB retrieval skipped kb=%s: index_status=%s vector_store=%s msg=%s",
+                knowledge_base.uuid,
+                knowledge_base.index_status,
+                bool(vector_store),
+                bool(user_message_text),
+            )
+
+        if top_chunks:
+            # Pass only relevant chunks + lightweight KB metadata (no full encoded_content)
+            kb_payload = knowledge_base_schema.model_dump(mode="json")
+            # Strip heavy encoded_content from each file to avoid token waste
+            for f in kb_payload.get("files", []):
+                f.pop("encoded_content", None)
+            kb_payload["semantic_chunks"] = top_chunks
+            content["knowledge_base"] = kb_payload
+        else:
+            # Fallback: not indexed yet (or retrieval unavailable) — pass full content
+            content["knowledge_base"] = knowledge_base_schema.model_dump(mode="json")
+
         content["topic"] = knowledge_base_schema.description
 
-    # Add file content if files are provided
-    if files:
-        content["question"] = augmented_message
+    # NOTE: content["question"] already carries the (possibly memory-prefixed)
+    # augmented message; re-assigning it here would discard recalled memory.
     messages: list[dict[str, str]] = [
         {"role": "user", "content": json.dumps(content)},
     ]
@@ -831,8 +1209,7 @@ async def _send_chat_agent_completion(
             span.set_attribute(
                 "server.address", urlparse(agent_api_base).hostname or agent_api_base
             )
-            span.set_attribute("gen_ai.prompt", request_data.get("message", ""))
-            span.set_attribute("gen_ai.input.messages", _otel_input_messages(messages))
+            _set_genai_input_content(span, request_data.get("message", ""), messages)
             span.set_attribute("datarobot.turn_id", str(message_uuid))
             dr_ctx_dict = (
                 auth_ctx.metadata.get("dr_ctx", {}) if auth_ctx.metadata else {}
@@ -883,10 +1260,7 @@ async def _send_chat_agent_completion(
                             )
 
             llm_message_content = processor.flush()
-            span.set_attribute("gen_ai.completion", llm_message_content)
-            span.set_attribute(
-                "gen_ai.output.messages", _otel_output_messages(llm_message_content)
-            )
+            _set_genai_output_content(span, llm_message_content)
             # Extract token usage from streaming response
             if usage_payload:
                 token_attrs = {

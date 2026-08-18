@@ -12,29 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-This LLM configuration option is useful when you already have an LLM Deployed.
-It will pull it into the playground and use case. It isn't sufficient if you
-have a registered model you would like added to an LLM Blueprint and deployed.
-For that, you'll need to choose the "registered_model_llm.py" option
+Choose this option when you have an existing registered model (for example a TextGen model)
+that is not yet deployed. It deploys the registered model, wraps that deployment in an LLM
+Blueprint via a CustomModelLlmValidation, then registers and deploys the blueprint for full
+DataRobot governance and monitoring.
 """
 
 import os
+
 import datarobot as dr
+import pulumi
+import pulumi_datarobot as datarobot
 from datarobot_pulumi_utils.pulumi import export
 from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
 from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
-import pulumi
-import pulumi_datarobot as datarobot
 
 from . import use_case
 from .libllm import (
+    DEPLOYED_LLM_PLACEHOLDER_MODEL,
+    ensure_datarobot_prefix,
     validate_feature_flags,
     verify_llm,
 )
 
 __all__ = [
-    "custom_model_runtime_parameters",
     "app_runtime_parameters",
+    "custom_model_runtime_parameters",
     "default_model",
     "llm_application_name",
     "llm_resource_name",
@@ -51,8 +54,12 @@ TEXTGEN_REGISTERED_MODEL_ID = os.environ["TEXTGEN_REGISTERED_MODEL_ID"]
 
 llm_application_name: str = "llm"
 llm_resource_name: str = "[llm]"
-default_model: str = os.environ.get(
-    "LLM_DEFAULT_MODEL", "datarobot/datarobot-deployed-llm"
+# The blueprint deployment routes by its deployment ID; the model string is only a label
+# (the endpoint ignores it), so it defaults to an inert placeholder. Set
+# LLM_DEFAULT_MODEL to the real model name if you want datarobot-genai to
+# match provider-specific reasoning parameters.
+default_model: str = ensure_datarobot_prefix(
+    os.environ.get("LLM_DEFAULT_MODEL", DEPLOYED_LLM_PLACEHOLDER_MODEL)
 )
 
 # Verify the feature flags are available
@@ -160,13 +167,19 @@ llm_deployment = datarobot.Deployment(
 
 
 app_runtime_parameters = [
+    # The app talks to the governed blueprint deployment (llm_deployment).
     datarobot.ApplicationSourceRuntimeParameterValueArgs(
         key=llm_application_name.upper() + "_DEPLOYMENT_ID",
         type="string",
         value=llm_deployment.id,
     ),
     datarobot.ApplicationSourceRuntimeParameterValueArgs(
-        key=llm_application_name.upper() + "_DEFAULT_MODEL",
+        key="USE_DATAROBOT_LLM_GATEWAY",
+        type="string",
+        value="0",
+    ),
+    datarobot.ApplicationSourceRuntimeParameterValueArgs(
+        key="LLM_DEFAULT_MODEL",
         type="string",
         value=default_model,
     ),
@@ -177,22 +190,29 @@ app_runtime_parameters = [
     ),
 ]
 custom_model_runtime_parameters = [
+    # The blueprint custom model wraps and calls the underlying proxy deployment. It must not
+    # reference llm_deployment.id (its own downstream deployment) or Pulumi would form a cycle.
     datarobot.CustomModelRuntimeParameterValueArgs(
         key="LLM_DEPLOYMENT_ID",
         type="string",
         value=proxy_llm_deployment.id,
     ),
     datarobot.CustomModelRuntimeParameterValueArgs(
-        key=llm_application_name.upper() + "_DEFAULT_MODEL",
+        key="USE_DATAROBOT_LLM_GATEWAY",
+        type="string",
+        value="0",
+    ),
+    datarobot.CustomModelRuntimeParameterValueArgs(
+        key="LLM_DEFAULT_MODEL",
         type="string",
         value=default_model,
     ),
 ]
 
-pulumi.export(
-    "Deployment ID " + proxy_llm_deployment.pulumi_resource_name,
-    proxy_llm_deployment.id,
-)
-export("LLM_DEPLOYMENT_ID", proxy_llm_deployment.id)
+# Export the deployment the app actually uses (the governed blueprint deployment), matching
+# app_runtime_parameters above.
+pulumi.export("Deployment ID " + llm_resource_name, llm_deployment.id)
+export("LLM_DEPLOYMENT_ID", llm_deployment.id)
+export("USE_DATAROBOT_LLM_GATEWAY", "0")
 export("LLM_DEFAULT_MODEL", default_model)
 export("LLM_DEFAULT_MODEL_FRIENDLY_NAME", proxy_llm_registered_model.name)

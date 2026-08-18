@@ -13,16 +13,17 @@
 # limitations under the License.
 import importlib
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
-from typing import cast, Final, Optional, Any, Sequence
-import yaml  # type: ignore[import-untyped]
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, Final, cast
 
 import datarobot as dr
 import pulumi
 import pulumi_datarobot
+import yaml  # type: ignore[import-untyped]
 from datarobot_pulumi_utils.common import get_datarobot_url
 from datarobot_pulumi_utils.pulumi import export, resolve_execution_environment_version
 from datarobot_pulumi_utils.pulumi.custom_model_deployment import CustomModelDeployment
@@ -33,9 +34,7 @@ from datarobot_pulumi_utils.schema.custom_models import (
 )
 from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
 
-
 from . import project_dir, use_case
-
 from .llm import custom_model_runtime_parameters as llm_custom_model_runtime_parameters
 
 DEFAULT_EXECUTION_ENVIRONMENT = "Python 3.11 GenAI Agents"
@@ -113,16 +112,16 @@ EXCLUDE_PATTERNS = [
 
 
 __all__ = [
+    "agent_retrieval_agent_agent_deployment",
+    "agent_retrieval_agent_agent_deployment_id",
+    "agent_retrieval_agent_agent_runtime_parameters",
+    "agent_retrieval_agent_app_runtime_parameters",
     "agent_retrieval_agent_application_name",
     "agent_retrieval_agent_application_path",
-    "agent_retrieval_agent_prediction_environment",
     "agent_retrieval_agent_custom_model",
-    "agent_retrieval_agent_agent_deployment_id",
-    "agent_retrieval_agent_registered_model_args",
     "agent_retrieval_agent_deployment_args",
-    "agent_retrieval_agent_agent_deployment",
-    "agent_retrieval_agent_app_runtime_parameters",
-    "agent_retrieval_agent_agent_runtime_parameters",
+    "agent_retrieval_agent_prediction_environment",
+    "agent_retrieval_agent_registered_model_args",
 ]
 
 agent_retrieval_agent_application_name: str = "agent_retrieval_agent"
@@ -270,7 +269,7 @@ def synchronize_pyproject_dependencies():
             shutil.copy2(uv_lock_path, docker_context_uv_lock_path)
 
 
-def maybe_import_from_module(module: str, object_name: str) -> Optional[Any]:
+def maybe_import_from_module(module: str, object_name: str) -> Any | None:
     """Attempt to import an object from a module.
 
     Args:

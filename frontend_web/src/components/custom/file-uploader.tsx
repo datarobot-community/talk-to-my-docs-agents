@@ -122,6 +122,10 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         <div className="w-full">
             <Dropzone onDrop={onDrop} maxSize={maxSize} accept={accept}>
                 {({ getRootProps, getInputProps }) => (
+                    // getRootProps() spreads tabIndex={0} plus an onKeyDown that opens the file
+                    // dialog on SPACE/ENTER, so this element is keyboard-operable — eslint just
+                    // can't see through the spread. The local onClick only stops propagation.
+                    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
                     <div
                         {...getRootProps()}
                         onClick={event => {

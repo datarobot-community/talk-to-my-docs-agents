@@ -303,14 +303,14 @@ export function ConnectedSourcesDialog({
                                 </div>
                             ) : (
                                 filteredFiles.map(file => (
-                                    <div
+                                    <button
                                         key={file.id}
-                                        className={`hover:bg-secondary flex cursor-pointer items-center gap-3 border-b p-3 last:border-b-0 ${
+                                        type="button"
+                                        disabled={isUploading}
+                                        className={`hover:bg-secondary flex w-full cursor-pointer items-center gap-3 border-b p-3 text-left last:border-b-0 ${
                                             isUploading ? 'opacity-50' : ''
                                         }`}
-                                        onClick={() =>
-                                            !isUploading && handleFileSelect(file, source)
-                                        }
+                                        onClick={() => handleFileSelect(file, source)}
                                     >
                                         {file.type === 'folder' ? (
                                             <FolderIcon className="text-link size-4 shrink-0" />
@@ -329,7 +329,7 @@ export function ConnectedSourcesDialog({
                                                 </span>
                                             </div>
                                         )}
-                                    </div>
+                                    </button>
                                 ))
                             )}
                         </div>

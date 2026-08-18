@@ -31,6 +31,9 @@ export interface KnowledgeBaseSchema {
     owner_uuid: string;
     is_public: boolean;
     can_edit: boolean;
+    retrieval_mode?: string;
+    index_status?: string;
+    last_error?: string | null;
     files: KnowledgeBaseFileSchema[];
 }
 
@@ -44,6 +47,7 @@ export interface KnowledgeBaseCreateRequest {
     path?: string;
     token_count?: number;
     is_public: boolean;
+    retrieval_mode?: string;
 }
 
 export interface KnowledgeBaseUpdateRequest {
@@ -51,6 +55,7 @@ export interface KnowledgeBaseUpdateRequest {
     description?: string;
     path?: string;
     is_public?: boolean;
+    retrieval_mode?: string;
 }
 
 export interface KnowledgeBaseListResponse {
