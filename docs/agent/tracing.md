@@ -8,7 +8,7 @@ Tracing is wired up by two pieces that the template generates automatically:
 
 | Piece | File | What it does |
 |---|---|---|
-| [`instrument()` call](#instrumentation-agentagentregisterpy) | `agent/agent/register.py` | Patches HTTP clients, the OpenAI SDK, and the agent framework to emit spans. |
+| [`instrument()` calls](#instrumentation-agentagentregisterpy) | `agent/agent/register.py` | Patches HTTP clients, the OpenAI SDK, and the agent framework to emit spans. |
 | [`otelcollector` block](#exporter-workflowyaml) | `agent/workflow.yaml` | Configures the OTel collector that exports those spans to DataRobot. |
 
 Both are present by default. You do not need to add them — this doc explains what they are so you know not to remove them and how to recognize them.
@@ -20,42 +20,45 @@ Both are present by default. You do not need to add them — this doc explains w
 
 ## Instrumentation (`agent/agent/register.py`)
 
-Near the top of `agent/agent/register.py`, `instrument()` from `datarobot_genai.core.telemetry.agent` is called right after the module imports:
+Near the top of `agent/agent/register.py`, `instrument()` from `datarobot_genai.core.telemetry.agent` is called right after the module imports, followed by the framework-specific `instrument()` for the agent's framework:
 
 ```python
 from datarobot_genai.core.telemetry.agent import instrument
+from datarobot_genai.langgraph.telemetry import instrument as instrument_langgraph
 # ... other module imports ...
 
 # INSTRUMENTATION CALL IS REQUIRED TO SETUP TRACING AND TELEMETRY FOR AGENTS
-instrument(framework="langgraph")
+instrument()
+instrument_langgraph()
 ```
 
-The call runs as the module loads, before the agent handles any requests, so the framework, HTTP clients, and the OpenAI SDK are instrumented and emit spans.
+Both calls run as the module loads, before the agent handles any requests: `instrument()` sets up the generic pieces (HTTP clients, the OpenAI SDK, the tracer provider), and the framework-specific `instrument()` captures framework spans (chains, agents, tool calls).
 
-### The `framework` argument
+### The framework-specific `instrument()`
 
-`instrument()` takes an optional `framework` argument that matches the agent's framework so framework-specific spans (chains, agents, tool calls) are captured. The template sets it for you:
+Each supported framework ships its own no-arg `instrument()`, imported from a matching subpackage. The template wires the right one in for you:
 
-| Framework | Call generated in `register.py` | Framework spans via |
+| Framework | Import generated in `register.py` | Framework spans via |
 |---|---|---|
-| Base (no framework) | `instrument()` | — |
-| LangGraph | `instrument(framework="langgraph")` | `LangchainInstrumentor` |
-| CrewAI | `instrument(framework="crewai")` | `CrewAIInstrumentor` |
-| LlamaIndex | `instrument(framework="llamaindex")` | `LlamaIndexInstrumentor` |
-
-`instrument()` also accepts `framework="nat"`, which instruments CrewAI, LangGraph, and LlamaIndex together.
+| Base (no framework) | — (only the generic `instrument()` is called) | — |
+| LangGraph | `from datarobot_genai.langgraph.telemetry import instrument` | `LangchainInstrumentor` |
+| CrewAI | `from datarobot_genai.crewai.telemetry import instrument` | `CrewAIInstrumentor` |
+| LlamaIndex | `from datarobot_genai.llama_index.telemetry import instrument` | `LlamaIndexInstrumentor` |
+| NAT | all three of the above, called together | `LangchainInstrumentor`, `CrewAIInstrumentor`, `LlamaIndexInstrumentor` |
 
 ### What gets instrumented
 
-Regardless of framework, `instrument()` always:
+The generic `instrument()` (from `datarobot_genai.core.telemetry.agent`) always:
 
 - Patches HTTP clients — `requests`, `aiohttp`, and `httpx` — so outbound calls are traced.
 - Patches the OpenAI SDK so LLM requests/responses become spans.
 - Instruments `threading` so spans propagate across threads.
 - Installs a global OpenTelemetry `TracerProvider` pointed at the DataRobot OTel ingest, so spans actually reach DataRobot.
-- Opts out of unrelated third-party telemetry (e.g., sets `RAGAS_DO_NOT_TRACK`, `DEEPEVAL_TELEMETRY_OPT_OUT`).
+- Opts out of unrelated third-party telemetry (e.g., sets `DEEPEVAL_TELEMETRY_OPT_OUT`).
 
-The call is **idempotent** — calling it more than once is safe; each client and framework is instrumented at most once.
+It no longer instruments any agent framework itself — that's what the framework-specific `instrument()` import above is for.
+
+Every `instrument()` call is **idempotent** — calling it more than once is safe; each client and framework is instrumented at most once.
 
 ---
 
@@ -89,4 +92,4 @@ For a deployed agent, open the deployment's **Monitoring > Data exploration** ta
 
 ## Disabling tracing
 
-Tracing is on by default and recommended. To disable it, remove the `instrument()` block from `agent/agent/register.py` **and** the `telemetry` block from `agent/workflow.yaml`. Removing this code disables all monitoring, tracing, and telemetry for the agent.
+Tracing is on by default and recommended. To disable it, remove the `instrument()` calls (both the generic one and the framework-specific one) from `agent/agent/register.py` **and** the `telemetry` block from `agent/workflow.yaml`. Removing this code disables all monitoring, tracing, and telemetry for the agent.

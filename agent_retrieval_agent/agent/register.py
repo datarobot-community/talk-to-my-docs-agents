@@ -18,6 +18,7 @@ from typing import Annotated, Any
 
 from ag_ui.core import RunAgentInput
 from datarobot_genai.core.telemetry.agent import instrument
+from datarobot_genai.crewai.telemetry import instrument as instrument_crewai
 from datarobot_genai.dragent.frontends.response import DRAgentEventResponse
 from nat.builder.builder import Builder
 from nat.builder.framework_enum import LLMFrameworkEnum
@@ -86,7 +87,8 @@ def _raise_gunicorn_worker_timeout() -> None:
 _raise_gunicorn_worker_timeout()
 
 # INSTRUMENTATION CALL IS REQUIRED TO SETUP TRACING AND TELEMETRY FOR AGENTS
-instrument(framework="crewai")
+instrument()
+instrument_crewai()
 
 
 class CrewaiAgentConfig(AgentBaseConfig, name="crewai_agent"):  # type: ignore[call-arg, misc]
@@ -110,12 +112,12 @@ async def crewai_agent(
 ) -> AsyncGenerator[Any, None]:
     from datarobot_genai.core.mcp import MCPConfig
     from datarobot_genai.crewai.mcp import mcp_tools_context
-    from datarobot_genai.dragent.frontends.converters import (
-        aggregate_dragent_event_responses,
-    )
-    from datarobot_genai.nat.helpers import (
+    from datarobot_genai.dragent.context import (
         extract_authorization_from_context,
         extract_datarobot_headers_from_context,
+    )
+    from datarobot_genai.dragent.frontends.converters import (
+        aggregate_dragent_event_responses,
     )
     from nat.builder.function_info import FunctionInfo, Streaming
 

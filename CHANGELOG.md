@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Retrieval agent deployment service health (bumped `datarobot-genai` which pulls in the service-health fix)
+
+
+## [11.12.0] - 2026-09-03
+
+### Changed
+
+- Synced component templates from upstream.
+- Bumped `hadolint/hadolint-action` (3.4.0 → 3.5.0).
 
 ## [11.11.0] - 2026-08-18
 

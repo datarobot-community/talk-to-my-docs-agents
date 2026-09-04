@@ -5,8 +5,8 @@ description = "Implementation of agent_retrieval_agent"
 readme = "README.md"
 requires-python = ">=3.11, <3.14"
 dependencies = [
-    "datarobot-genai[crewai, dragent, auth]==0.21.1",
-    "datarobot-moderations[all]==11.2.33",
+    "datarobot-genai[crewai, dragent, auth]==0.29.23",
+    "datarobot-moderations[all]>=11.2.47,<12.0.0",
     "datarobot-drum==1.17.17",
     "datarobot-mlops==11.1.28",
     "langchain-litellm>=0.2.3",
@@ -212,17 +212,16 @@ override-dependencies = [
     "fastapi>=0.118.2,<0.133.0",  # NAT 1.6.0 uses add_event_handler removed in starlette 1.0 (https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1882)
     "starlette>=0.49.1,<1.0.0",  # constrained by fastapi<0.133.0 (https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1882)
     "pyarrow==21.0.0",
-    # crewai and drum pin otel to 1.34.x but datarobot-moderations needs 0.60b1
-    # instrumentation which requires otel 1.39.x. Override the entire otel family
-    # to stay version-synchronized at 1.39.x / 0.60b1. The upper bound is pinned to
-    # <1.40.0 because semantic-conventions is held at 0.60b1 (otel 1.39.x); without
-    # it the api/exporters float to 1.42.x while the sdk stays at 1.39.x, producing
-    # an ImportError (OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED).
-    "opentelemetry-api>=1.39.0,<1.40.0",
-    "opentelemetry-sdk>=1.39.0,<1.40.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.39.0,<1.40.0",
-    "opentelemetry-exporter-otlp-proto-common>=1.39.0,<1.40.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.39.0,<1.40.0",
+    # crewai and drum pin otel to 1.34.x but datarobot-moderations needs 0.65b0
+    # instrumentation which requires otel 1.44.x. Override the entire otel family
+    # to stay version-synchronized at 1.44.x / 0.65b0. The upper bound is pinned to
+    # <1.45.0 so api/exporters cannot float ahead of the sdk.
+    "opentelemetry-api>=1.44.0,<1.45.0",
+    "opentelemetry-sdk>=1.44.0,<1.45.0",
+    "opentelemetry-semantic-conventions>=0.65b0,<0.66b0",  # Match instrumentation requirements
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0,<1.45.0",
+    "opentelemetry-exporter-otlp-proto-common>=1.44.0,<1.45.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<1.45.0",
     # nvidia-nat-crewai==1.4.1 pins crewai<1.0.0 but datarobot-genai requires crewai>=1.1.0.
     # Override until nvidia-nat-crewai ships a fix upstream (BUZZOK-29844).
     # Upstream issue: https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1802
@@ -230,18 +229,11 @@ override-dependencies = [
 
     # NOTE: the template's "unlock latest langgraph" overrides (langgraph>=1.1.0,
     # langgraph-prebuilt>=1.0.0) are intentionally omitted. This is a crewai/dragent
-    # agent, not the langgraph framework variant; forcing langgraph 1.x drags
-    # langchain-core to 1.x, which pulls langchain-community 0.4.x (no
-    # chat_models.vertexai) and breaks ragas 0.4.3's import.
+    # agent, not the langgraph framework variant.
 
     # Keep this in sync with the ag-ui-protocol version in fastapi_server/pyproject.toml of the
     # recipe-datarobot-agent-application.
     "ag-ui-protocol==0.1.15",
-
-    # ragas 0.4.3 hard-imports langchain_community.chat_models.vertexai, which was
-    # removed in langchain-community 0.4.x. Pin community to 0.3.x (where the module
-    # still exists); nvidia-nat-langchain 1.7.0 accepts community ~=0.3.
-    "langchain-community>=0.3,<0.4",
 
     # CVE fixes
     "langgraph-checkpoint>=3.0.0",
@@ -249,7 +241,6 @@ override-dependencies = [
     "nltk>=3.9.4",
     "openai>=2.30.0",  # litellm >= 1.83.7 pins openai at 2.24, causing dependency rollback and re-introducing CVEs.
     "pdfminer.six>=20251230",
-    "ragas>=0.4.3",
     "mako>=1.3.12",
 
     # Excluded
@@ -271,7 +262,6 @@ override-dependencies = [
     # NOTE: python-docx is NOT excluded here (unlike the base template) — this docs
     # agent imports `docx` directly in agent/core/document_loader for .docx parsing.
     "llama-index-cli; sys_platform == 'never'",  # CLI tool pulled in by llama-index; not needed at runtime
-    "scikit-network; sys_platform == 'never'",  # graph analysis pulled in by ragas; not used
     # nemoguardrails — server / CLI stack pulled in via datarobot-moderations[all]; not used at runtime
     "watchdog; sys_platform == 'never'",  # file watcher for guardrails hot-reload; not used
     # prompt-toolkit and wcwidth are intentionally NOT excluded: IPython (via ipykernel / agentic_playground)

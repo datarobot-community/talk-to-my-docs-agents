@@ -45,6 +45,27 @@ ignore {
     input.VulnerabilityID == "CVE-2026-45829"
 }
 
+# chromadb CVE-2026-45833 (CRITICAL) — authenticated RCE, same code path as CVE-2026-45829
+# above; unused transitive dep, no Chroma server/client run here, no fix exists yet.
+ignore {
+    input.PkgName == "chromadb"
+    input.VulnerabilityID == "CVE-2026-45833"
+}
+
+# chromadb CVE-2026-45830 (HIGH) — cross-tenant read/write via V1 endpoints, no fix yet.
+# Same unused-transitive-dep / no-Chroma-server reachability as the chromadb CVEs above.
+ignore {
+    input.PkgName == "chromadb"
+    input.VulnerabilityID == "CVE-2026-45830"
+}
+
+# chromadb CVE-2026-45831 (HIGH) — SimpleRBACAuthorizationProvider ignores tenant/database/
+# collection scope, no fix yet. Same reachability as the chromadb CVEs above.
+ignore {
+    input.PkgName == "chromadb"
+    input.VulnerabilityID == "CVE-2026-45831"
+}
+
 # jupyter-server CVE-2026-44727 (CRITICAL) — stored XSS in NbconvertFileHandler. Trivy scans
 # the lockfile, not the shipped artifact: jupyter-server is pulled only by the optional
 # `agentic_playground` extra (jupyter-kernel-gateway) in agent_retrieval_agent and is NOT

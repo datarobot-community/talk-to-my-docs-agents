@@ -29,7 +29,10 @@ Agent must implement the following components:
 from crewai import Agent, Crew, Process, Task
 from datarobot_genai.crewai.agent import datarobot_agent_class_from_crew
 
-kickoff_inputs = lambda user_prompt_content: {"topic": str(user_prompt_content), "chat_history": ""}
+kickoff_inputs = lambda user_prompt_content: {
+    "topic": str(user_prompt_content),
+    "chat_history": "",
+}
 MyAgent = datarobot_agent_class_from_crew(crew, agents, tasks, kickoff_inputs)
 ```
 

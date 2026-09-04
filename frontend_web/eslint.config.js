@@ -90,7 +90,10 @@ export default defineConfig(
         // Test fixtures deliberately attach handlers to bare elements to assert event
         // behaviour; they are not shipped UI. dr-ui and the design system relax the
         // interaction rules under their own test globs.
-        files: ['tests/**/*.{ts,tsx}', '**/*.{test,spec}.{ts,tsx}'],
+        files: ['tests/**/*.{ts,tsx}', 'tests/*.{ts,tsx}', '**/*.{test,spec}.{ts,tsx}'],
+        languageOptions: {
+            globals: globals.vitest,
+        },
         rules: {
             'jsx-a11y/click-events-have-key-events': 'off',
             'jsx-a11y/no-static-element-interactions': 'off',

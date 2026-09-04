@@ -40,7 +40,7 @@ from datarobot_genai.core.chat import agent_chat_completion_wrapper
 from datarobot_genai.core.mcp import MCPConfig
 from datarobot_genai.crewai.agent import CrewAIAgent
 from datarobot_genai.crewai.mcp import mcp_tools_context
-from datarobot_genai.crewai.ragas_events import CrewAIRagasEventListener
+from datarobot_genai.crewai.moderations_events import CrewAIModerationsEventListener
 from openai.types.chat import CompletionCreateParams
 from opentelemetry import trace
 
@@ -56,7 +56,7 @@ from agent.tool import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ragas import MultiTurnSample
+    from datarobot_genai.core.pipeline_interactions import MultiTurnSample
 
 
 class MyAgent(CrewAIAgent):
@@ -570,8 +570,8 @@ class MyAgent(CrewAIAgent):
         pipeline_interactions = None
 
         with crewai_event_bus.scoped_handlers():
-            ragas_listener = CrewAIRagasEventListener()
-            ragas_listener.setup_listeners(crewai_event_bus)
+            moderations_listener = CrewAIModerationsEventListener()
+            moderations_listener.setup_listeners(crewai_event_bus)
 
             kickoff_inputs = self.make_kickoff_inputs(user_prompt_content)
             crew = self.crew
@@ -595,7 +595,7 @@ class MyAgent(CrewAIAgent):
                 usage_metrics = self._extract_usage_metrics(streaming_output)
                 self._set_otel_usage_attributes(usage_metrics)
                 pipeline_interactions = self.create_pipeline_interactions_from_messages(
-                    ragas_listener.messages
+                    moderations_listener.messages
                 )
                 if response_text:
                     yield (
@@ -703,7 +703,7 @@ class MyAgent(CrewAIAgent):
             usage_metrics = self._extract_usage_metrics(crew_output)
             self._set_otel_usage_attributes(usage_metrics)
             pipeline_interactions = self.create_pipeline_interactions_from_messages(
-                ragas_listener.messages
+                moderations_listener.messages
             )
 
             # Fallback: if marker-gated streaming produced no answer text (manager

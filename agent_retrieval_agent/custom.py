@@ -16,8 +16,10 @@
 # REMOVING THIS CODE WILL DISABLE ALL MONITORING, TRACING AND TELEMETRY.
 # isort: off
 from datarobot_genai.core.telemetry.agent import instrument
+from datarobot_genai.crewai.telemetry import instrument as instrument_crewai
 
-instrument(framework="crewai")
+instrument()
+instrument_crewai()
 # ruff: noqa: E402
 from agent import Config, custompy_adaptor
 

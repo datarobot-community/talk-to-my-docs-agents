@@ -19,7 +19,12 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from crewai.types.streaming import CrewStreamingOutput, StreamChunk, StreamChunkType
-from ragas.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from datarobot_dome.guards.agent_goal_accuracy import (
+    AIMessage,
+    HumanMessage,
+    ToolCall,
+    ToolMessage,
+)
 
 from agent import MyAgent
 
@@ -365,7 +370,7 @@ class TestMyAgentCrewAI:
         )
 
     @patch("agent.myagent.Crew")
-    @patch("agent.myagent.CrewAIRagasEventListener")
+    @patch("agent.myagent.CrewAIModerationsEventListener")
     @patch("agent.myagent.trace.get_current_span")
     @patch("agent.myagent.Task")
     @patch("agent.myagent.Agent")
@@ -438,7 +443,7 @@ class TestMyAgentCrewAI:
         mock_span.set_attribute.assert_any_call("gen_ai.usage.output_tokens", 1)
 
     @patch("agent.myagent.Crew")
-    @patch("agent.myagent.CrewAIRagasEventListener")
+    @patch("agent.myagent.CrewAIModerationsEventListener")
     @patch("agent.myagent.trace.get_current_span")
     @patch("agent.myagent.Task")
     @patch("agent.myagent.Agent")

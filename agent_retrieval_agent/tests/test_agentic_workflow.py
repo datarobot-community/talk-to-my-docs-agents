@@ -193,6 +193,7 @@ class TestCustomModel:
                 "created": ANY,
                 "model": "test-model",
                 "object": "chat.completion",
+                "metadata": None,
                 "service_tier": None,
                 "system_fingerprint": None,
                 "usage": {

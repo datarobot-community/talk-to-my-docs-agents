@@ -33,6 +33,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
+            '~': path.resolve(__dirname, './src'),
         },
     },
     base: base,
@@ -56,7 +57,7 @@ export default defineConfig({
         environment: 'jsdom',
         setupFiles: './tests/setupTests.ts',
         typecheck: {
-            tsconfig: './tsconfig.test.json',
+            tsconfig: './tsconfig.json',
         },
     },
 });
