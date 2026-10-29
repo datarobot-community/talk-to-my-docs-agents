@@ -1,0 +1,570 @@
+# Copyright 2026 DataRobot, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Shared config assembly for both agent runtimes (Custom Models and Workload API).
+
+Owns everything that is identical regardless of ``ENABLE_AGENT_ON_WORKLOAD_API``:
+execution-environment resolution, LLM/MCP/memory/session/IDP runtime-parameter
+assembly, memory-space provisioning (agent memory only), and A2A detection. The only Pulumi
+resources created here are credentials and (when memory is
+``datarobot_memory_service``) the agent-memory ``MemorySpace`` — both runtime-agnostic.
+Runtime-specific resources (``CustomModel``/``Playground``/``LlmBlueprint`` for
+Custom Models; ``Artifact``/``Workload`` for Workload API) live in
+``deployment.py``/``workload.py`` respectively, which never check the runtime
+flag themselves and never import each other.
+"""
+
+from __future__ import annotations
+
+import importlib
+import logging
+import os
+import re
+from pathlib import Path
+from typing import Any, Final, Optional
+
+import pulumi
+import pulumi_datarobot
+import yaml  # type: ignore[import-untyped]
+from datarobot_pulumi_utils.pulumi import resolve_execution_environment_version
+from datarobot_pulumi_utils.pulumi.stack import PROJECT_NAME
+from datarobot_pulumi_utils.schema.exec_envs import RuntimeEnvironments
+
+from .. import project_dir
+from ..llm import custom_model_runtime_parameters as llm_custom_model_runtime_parameters
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_EXECUTION_ENVIRONMENT = "Python 3 GenAI Agents"
+# Canonical DataRobot agent environments, matched by substring against
+# DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT. Each name lists the environments to try in
+# order; the default falls back to the 3.11 environment on DataRobot installations that
+# do not have the Python 3 environment yet.
+CANONICAL_EXECUTION_ENVIRONMENTS = {
+    "Python 3.11 GenAI Agents": [RuntimeEnvironments.PYTHON_311_GENAI_AGENTS],
+    DEFAULT_EXECUTION_ENVIRONMENT: [
+        RuntimeEnvironments.PYTHON_3_GENAI_AGENTS,
+        RuntimeEnvironments.PYTHON_311_GENAI_AGENTS,
+    ],
+}
+
+agent_retrieval_agent_application_name: str = "agent_retrieval_agent"
+agent_retrieval_agent_asset_name: str = f"[{PROJECT_NAME}] [agent_retrieval_agent]"
+agent_retrieval_agent_application_path = project_dir.parent / "agent_retrieval_agent"
+
+# Toggle for High Availability (HA) and Load Balancing configuration for agent deployment.
+# To enable HA mode: Add ENABLE_AGENT_HA_MODE="true" to your .env file in the project root.
+# This only sizes the Custom Models resource bundle/replicas (see deployment.py) — Workload
+# API sizing is fully independent via WORKLOAD_CPU/WORKLOAD_MEMORY/WORKLOAD_REPLICA_COUNT.
+ENABLE_AGENT_HA_MODE = os.environ.get("ENABLE_AGENT_HA_MODE", "false").lower() == "true"
+
+# Gunicorn worker timeout (seconds) for the dragent front end, read by datarobot-genai
+# whenever the process is started with `--use_gunicorn true`. Shared across runtimes: the
+# Custom Models container always uses it, and so does the Workload API generated-Dockerfile
+# scenario's run_server.sh (see workload.py). Raised above gunicorn's 30s default so long
+# agent turns aren't killed mid-stream.
+DEFAULT_AGENT_GUNICORN_WORKER_TIMEOUT: Final[str] = "600"
+
+SESSION_SECRET_KEY: Final[str] = "SESSION_SECRET_KEY"
+IDP_AGENT_ID_PARAM: Final[str] = "IDP_AGENT_ID"
+PRIVATE_JWK_PARAM: Final[str] = "IDP_AGENT_PRIVATE_KEY_JWK"
+AGENT_CARD_REGISTRY_SOFT_CACHE_TTL: Final[str] = "AGENT_CARD_REGISTRY_SOFT_CACHE_TTL"
+
+EXCLUDE_PATTERNS = [
+    re.compile(pattern)
+    for pattern in [
+        r".*tests/.*",
+        r".*\.coverage",
+        r".*\.DS_Store",
+        r".*\.pyc",
+        r".*\.ruff_cache/.*",
+        r".*\.venv/.*",
+        r".*\.mypy_cache/.*",
+        r".*__pycache__/.*",
+        r".*\.pytest_cache/.*",
+        r".*\.uv/.*",
+        r".*\.tensile/.*",
+        r".*docker_context/.*",
+        r".*\.env(?:\.[A-Za-z0-9_-]+)*$",
+    ]
+]
+
+# Co-deployed MCP is auto-wired by this name; renamed/extra MCP → env vars.
+MCP_MODULE_NAME: Final[str] = "mcp_server"
+
+# The co-deployed MCP module (if any) lives at infra/mcp_server.py, a sibling
+# of the infra.agent_retrieval_agent_infra package this module lives in -- not inside it.
+# Resolve one level up from __package__ (rather than hardcoding "infra") so this
+# still works if the top-level package is ever renamed.
+_TOP_LEVEL_INFRA_PACKAGE: Final[str] = (__package__ or "").rsplit(".", 1)[0]
+
+
+def _find_workflow_yaml() -> Path | None:
+    """Locate workflow.yaml for the agent.
+
+    Checks the agent root directory first, then falls back to the agent/ subdirectory.
+    """
+    base = project_dir.parent / "agent_retrieval_agent"
+
+    primary = base / "workflow.yaml"
+    if primary.exists():
+        return primary
+
+    fallback = base / "agent" / "workflow.yaml"
+    if fallback.exists():
+        return fallback
+
+    return None
+
+
+def _is_truthy_yaml_value(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "enabled")
+    return bool(value)
+
+
+def _load_workflow_config() -> dict[str, Any]:
+    workflow_yaml_path = _find_workflow_yaml()
+    if workflow_yaml_path is None:
+        return {}
+    with open(workflow_yaml_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _a2a_config() -> Any:
+    """The ``general.front_end.a2a`` block from ``workflow.yaml``, or None when absent."""
+    workflow_config = _load_workflow_config()
+    return ((workflow_config.get("general") or {}).get("front_end") or {}).get("a2a")
+
+
+def check_a2a_server_enabled() -> bool:
+    return _a2a_config() is not None
+
+
+def check_a2a_unauthenticated_well_known_route_enabled() -> bool:
+    a2a = _a2a_config()
+    if not isinstance(a2a, dict):
+        return False
+    return _is_truthy_yaml_value(a2a.get("enable_unauthenticated_well_known_route"))
+
+
+# Suffix datarobot-genai mounts the A2A app under when `a2a.mount_path` is unset.
+# Mirrors datarobot_genai.dragent.constants.A2A_MOUNT_PATH -- duplicated rather than
+# imported because the infra venv deliberately does not depend on datarobot-genai.
+A2A_MOUNT_PATH_DEFAULT: Final[str] = "a2a"
+
+# RFC 3986 section 2.3 unreserved characters: the per-segment alphabet
+# datarobot_genai's DRAgentA2AConfig._normalize_mount_path accepts.
+_A2A_MOUNT_PATH_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9\-._~]+")
+
+
+def get_a2a_mount_path() -> str:
+    """Path suffix the agent serves A2A from, per ``general.front_end.a2a.mount_path``.
+
+    ``directAccess`` (Custom Models) and the workload route both forward the full
+    prefixed path into the container, so the suffix the agent actually mounted A2A
+    under has to appear in the URLs we build here or they resolve nowhere.
+
+    Surrounding slashes are stripped so ``"/a2a/"`` and ``"a2a"`` agree; interior
+    slashes are kept for multi-segment mounts such as ``"api/a2a"``.
+
+    Validation is deliberately lenient. datarobot-genai rejects an invalid value at
+    container startup and is the authoritative validator; duplicating its full rule set
+    here would only risk blocking a deploy it would have accepted. So a suspect value is
+    warned about and passed through, and a missing or blank one falls back to the default.
+    """
+    a2a = _a2a_config()
+    if not isinstance(a2a, dict):
+        return A2A_MOUNT_PATH_DEFAULT
+
+    raw = a2a.get("mount_path")
+    if raw is None:
+        return A2A_MOUNT_PATH_DEFAULT
+
+    normalized = str(raw).strip().strip("/")
+    if not normalized:
+        pulumi.warn(
+            f"a2a.mount_path is {raw!r}, which is empty once slashes are stripped. "
+            f"datarobot-genai rejects mounting A2A at the application root, so the "
+            f"agent will fail to start. Falling back to {A2A_MOUNT_PATH_DEFAULT!r} "
+            f"for the URLs exported here."
+        )
+        return A2A_MOUNT_PATH_DEFAULT
+
+    for segment in normalized.split("/"):
+        if (
+            not segment
+            or segment.startswith(".")
+            or not _A2A_MOUNT_PATH_SEGMENT_RE.fullmatch(segment)
+        ):
+            pulumi.warn(
+                f"a2a.mount_path segment {segment!r} in {raw!r} is not one datarobot-genai "
+                f"accepts (letters, digits and - . _ ~, not starting with a dot). The agent "
+                f"will likely fail to start; exporting the URL as configured anyway."
+            )
+            break
+
+    return normalized
+
+
+def a2a_url(base_url: str) -> str:
+    """Append the configured A2A mount path to ``base_url``, with one trailing slash.
+
+    Local stand-in for ``datarobot_genai.dragent.deployment_urls.join_mount_path`` --
+    see :data:`A2A_MOUNT_PATH_DEFAULT` for why it is not imported. Both runtimes compose
+    their A2A URL through here so the trailing-slash convention lives in one place.
+    """
+    return f"{base_url.rstrip('/')}/{A2A_MOUNT_PATH}/"
+
+
+IS_A2A_SERVER_ENABLED = check_a2a_server_enabled()
+IS_A2A_UNAUTHENTICATED_WELL_KNOWN_ROUTE_ENABLED = (
+    check_a2a_unauthenticated_well_known_route_enabled()
+)
+A2A_MOUNT_PATH = get_a2a_mount_path()
+
+
+def resolve_canonical_execution_environment_id(
+    requested: str,
+) -> Optional[tuple[str, bool]]:
+    """Return ``(id, fell_back)`` for the first available environment behind the
+    canonical name in ``requested``, or None when ``requested`` names no canonical
+    environment. ``fell_back`` is True when an environment later in the list was used.
+
+    Each lookup is a live API call, so an environment missing from this DataRobot
+    installation is skipped and the next one in the list is tried.
+    """
+    for name, runtime_environments in CANONICAL_EXECUTION_ENVIRONMENTS.items():
+        if name not in requested:
+            continue
+        for position, runtime_environment in enumerate(runtime_environments):
+            try:
+                execution_environment_id = runtime_environment.value.id
+            except ValueError:
+                pulumi.info(
+                    f"Execution environment {runtime_environment.value.name} not found "
+                    "on this DataRobot installation."
+                )
+                continue
+            pulumi.info(
+                f"Using DataRobot execution environment: {runtime_environment.value.name}."
+            )
+            return execution_environment_id, position > 0
+        raise ValueError(
+            f"No execution environment for {name} exists on this DataRobot installation."
+        )
+    return None
+
+
+def resolve_agent_execution_environment(
+    *,
+    asset_name: str,
+    application_path: Path,
+    use_cases: list[str],
+) -> pulumi_datarobot.ExecutionEnvironment:
+    """Resolve (or build) the agent's execution environment.
+
+    Controlled by ``DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT``:
+
+    - **unset** (default): build a new ``ExecutionEnvironment`` from
+      ``docker_context.tar.gz`` when present under ``application_path``, otherwise
+      from the ``docker_context`` folder.
+    - **set to a DataRobot agent environment name** (one of
+      ``CANONICAL_EXECUTION_ENVIRONMENTS``): resolved to the first available
+      ``RuntimeEnvironments`` entry listed for that name and referenced via
+      ``ExecutionEnvironment.get`` (optionally pinned with
+      ``DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID``; the pin is ignored
+      when a later entry in the list was used, see
+      ``resolve_canonical_execution_environment_id``).
+    - **set to any other value**: treated as a pre-existing execution environment
+      ID and referenced via ``ExecutionEnvironment.get`` (same version pinning).
+
+    ``use_cases`` controls the ``ExecutionEnvironment.use_cases`` argument used
+    only in the "build a new one" branch. Custom Models passes
+    ``["customModel", "notebook"]`` — the ``"notebook"`` tag is load-bearing for
+    Playground's ephemeral-codespace fallback (see deployment.py). Workload
+    API's generated-Dockerfile scenario passes only ``["customModel"]``, since it
+    has no Playground/codespace use.
+    """
+    dr_exec_env = os.environ.get("DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT", "").strip()
+    if len(dr_exec_env) > 0:
+        execution_environment_id, fell_back = (
+            resolve_canonical_execution_environment_id(dr_exec_env)
+            or (dr_exec_env, False)
+        )
+
+        # A version pin belongs to the environment it was taken from, so it does not
+        # apply to a fallback environment: use its latest version.
+        execution_environment_version_id = (
+            None
+            if fell_back
+            else resolve_execution_environment_version(
+                execution_environment_id,
+                "DATAROBOT_DEFAULT_EXECUTION_ENVIRONMENT_VERSION_ID",
+            )
+        )
+
+        pulumi.info(
+            "Using existing execution environment: "
+            + execution_environment_id
+            + " Version ID: "
+            + str(execution_environment_version_id)
+        )
+
+        return pulumi_datarobot.ExecutionEnvironment.get(
+            id=execution_environment_id,
+            version_id=execution_environment_version_id,
+            resource_name=asset_name + " Execution Environment",
+        )
+
+    if os.path.exists(os.path.join(str(application_path), "docker_context.tar.gz")):
+        pulumi.info(
+            "Using prebuilt Dockerfile docker_context.tar.gz to run the execution environment"
+        )
+        return pulumi_datarobot.ExecutionEnvironment(
+            resource_name=asset_name + " Execution Environment",
+            name=asset_name + " Execution Environment",
+            description="Execution Environment for " + asset_name,
+            programming_language="python",
+            docker_image=os.path.join(str(application_path), "docker_context.tar.gz"),
+            use_cases=use_cases,
+        )
+
+    pulumi.info("Using docker_context folder to compile the execution environment")
+    return pulumi_datarobot.ExecutionEnvironment(
+        resource_name=asset_name + " Execution Environment",
+        name=asset_name + " Execution Environment",
+        description="Execution Environment for " + asset_name,
+        programming_language="python",
+        docker_context_path=os.path.join(str(application_path), "docker_context"),
+        use_cases=use_cases,
+    )
+
+
+def maybe_import_from_module(module: str, object_name: str) -> Optional[Any]:
+    """Attempt to import an object from a module.
+
+    Args:
+        module: The module name to import from (can include relative imports like ".module_name")
+        object_name: The name of the object to import from the module
+
+    Returns:
+        The imported object if successful, None otherwise
+    """
+    if not module:
+        return None
+
+    try:
+        # Ensure relative import format
+        module_path = module if module.startswith(".") else f".{module}"
+        imported_module = importlib.import_module(
+            module_path, package=_TOP_LEVEL_INFRA_PACKAGE
+        )
+        return getattr(imported_module, object_name, None)
+    except (ImportError, AttributeError) as exc:
+        logger.debug("Skipping module '%s' due to import error: %s", module, exc)
+        return None
+
+
+# The settings that point the agent at an MCP server, in datarobot-genai's precedence.
+MCP_SERVER_SETTINGS = ("MCP_WORKLOAD_ID", "MCP_DEPLOYMENT_ID", "EXTERNAL_MCP_URL")
+
+
+def get_mcp_runtime_parameters_from_env() -> list[
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+]:
+    mcp_runtime_parameters: list[
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+    ] = []
+
+    # MCP server on the DataRobot Workload API. datarobot-genai looks up the workload's
+    # endpoint and prefers it over every setting below.
+    if os.environ.get("MCP_WORKLOAD_ID"):
+        mcp_workload_id = os.environ["MCP_WORKLOAD_ID"]
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="MCP_WORKLOAD_ID",
+                type="string",
+                value=mcp_workload_id,
+            )
+        )
+        pulumi.info(f"MCP configured with DataRobot workload: {mcp_workload_id}")
+
+    # Add MCP runtime parameters if configured
+    if os.environ.get("MCP_DEPLOYMENT_ID"):
+        mcp_deployment_id = os.environ["MCP_DEPLOYMENT_ID"]
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="MCP_DEPLOYMENT_ID",
+                type="string",
+                value=mcp_deployment_id,
+            )
+        )
+        pulumi.info(f"MCP configured with DataRobot MCP Server: {mcp_deployment_id}")
+
+    # Allow external mcp server. Currently, code will use MCP_WORKLOAD_ID or MCP_DEPLOYMENT_ID first
+    # and if those are empty then use the EXTERNAL_MCP_URL
+    if os.environ.get("EXTERNAL_MCP_URL"):
+        external_mcp_url = os.environ["EXTERNAL_MCP_URL"].rstrip("/")
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="EXTERNAL_MCP_URL",
+                type="string",
+                value=external_mcp_url,
+            )
+        )
+        pulumi.info(f"MCP configured with external server: {external_mcp_url}")
+
+    # Add optional EXTERNAL_MCP_HEADERS
+    external_mcp_headers = os.environ.get("EXTERNAL_MCP_HEADERS")
+    if external_mcp_headers:
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="EXTERNAL_MCP_HEADERS",
+                type="string",
+                value=external_mcp_headers,
+            )
+        )
+        pulumi.info(f"External MCP configured with headers: {external_mcp_headers}")
+
+    # Add optional EXTERNAL_MCP_TRANSPORT parameter
+    external_mcp_transport = os.environ.get("EXTERNAL_MCP_TRANSPORT")
+    if external_mcp_transport:
+        external_mcp_transport = os.environ["EXTERNAL_MCP_TRANSPORT"]
+        mcp_runtime_parameters.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key="EXTERNAL_MCP_TRANSPORT",
+                type="string",
+                value=external_mcp_transport,
+            )
+        )
+        pulumi.info(f"External MCP configured with transport: {external_mcp_transport}")
+
+    if not any(os.environ.get(key) for key in MCP_SERVER_SETTINGS):
+        pulumi.info(
+            "MCP not configured: the agent deploys without MCP tools. To add some, set "
+            + ", ".join(MCP_SERVER_SETTINGS[:-1])
+            + f" or {MCP_SERVER_SETTINGS[-1]} (docs/agent/mcp.md)."
+        )
+
+    return mcp_runtime_parameters
+
+
+def get_mcp_custom_model_runtime_parameters() -> list[
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+]:
+    """
+    Load MCP runtime parameters from the conventionally-named MCP module when it
+    is present in the project and passes some, otherwise fall back to environment
+    variables. Older versions of the MCP component pass none when their server
+    runs on the Workload API (newer ones pass MCP_WORKLOAD_ID), so the agent then
+    uses the settings in .env, such as MCP_WORKLOAD_ID.
+    """
+    mcp_params = maybe_import_from_module(
+        MCP_MODULE_NAME, "mcp_custom_model_runtime_parameters"
+    )
+    if mcp_params:
+        return mcp_params
+    return get_mcp_runtime_parameters_from_env()
+
+
+def build_shared_agent_runtime_parameters() -> list[
+    pulumi_datarobot.CustomModelRuntimeParameterValueArgs
+]:
+    """Assemble the LLM/MCP/memory/session/IDP runtime parameters shared by both runtimes.
+
+    Meant to be called exactly once by the entry router, regardless of which
+    runtime ends up consuming the result: Custom Models passes the list
+    straight into ``CustomModel.runtime_parameter_values`` (after appending its
+    own ``CUSTOM_MODEL_WORKERS``); Workload API translates each entry into a
+    container env var (plain value, or a ``dr-credential`` reference for
+    ``type="credential"`` entries — see ``workload.py``).
+
+    As a side effect, creates the session-secret / IDP-JWK
+    credentials — all
+    runtime-agnostic. Excludes ``CUSTOM_MODEL_WORKERS``: that parameter is a
+    DataRobot custom-model-container gunicorn-wrapper convention with no
+    Workload-container equivalent, so it is added only by ``deployment.py``.
+    """
+    params: list[pulumi_datarobot.CustomModelRuntimeParameterValueArgs] = (
+        []
+        + llm_custom_model_runtime_parameters
+        + get_mcp_custom_model_runtime_parameters()
+    )
+
+    params.append(
+        pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+            key="AGENT_GUNICORN_WORKER_TIMEOUT",
+            type="string",  # string is type-agnostic; numeric fails str settings fields
+            value=DEFAULT_AGENT_GUNICORN_WORKER_TIMEOUT,
+        )
+    )
+
+    # Handle session secret key credential
+    if session_secret_key := os.environ.get(SESSION_SECRET_KEY):
+        pulumi.export(SESSION_SECRET_KEY, session_secret_key)
+        session_secret_cred = pulumi_datarobot.ApiTokenCredential(
+            agent_retrieval_agent_asset_name + " Session Secret Key",
+            args=pulumi_datarobot.ApiTokenCredentialArgs(
+                api_token=str(session_secret_key)
+            ),
+        )
+        params.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                type="credential",
+                key=SESSION_SECRET_KEY,
+                value=session_secret_cred.id,
+            ),
+        )
+
+    idp_agent_id = os.environ.get(IDP_AGENT_ID_PARAM, "")
+    if idp_agent_id:
+        params.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key=IDP_AGENT_ID_PARAM,
+                type="string",
+                value=idp_agent_id,
+            ),
+        )
+        pulumi.info(f"Configured with IDP_AGENT_ID: {idp_agent_id}")
+
+    soft_cache_ttl = os.environ.get(AGENT_CARD_REGISTRY_SOFT_CACHE_TTL, "").strip()
+    if soft_cache_ttl:
+        params.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                key=AGENT_CARD_REGISTRY_SOFT_CACHE_TTL,
+                type="string",  # numeric is not compatible with DataRobotAppFrameworkBaseSettings
+                value=soft_cache_ttl,
+            ),
+        )
+        pulumi.info(
+            f"Configured with AGENT_CARD_REGISTRY_SOFT_CACHE_TTL: {soft_cache_ttl}"
+        )
+
+    private_jwk = os.environ.get(PRIVATE_JWK_PARAM)
+    if private_jwk:
+        private_jwk_cred = pulumi_datarobot.ApiTokenCredential(
+            agent_retrieval_agent_asset_name + " Private JWK",
+            args=pulumi_datarobot.ApiTokenCredentialArgs(api_token=str(private_jwk)),
+        )
+        params.append(
+            pulumi_datarobot.CustomModelRuntimeParameterValueArgs(
+                type="credential",
+                key=PRIVATE_JWK_PARAM,
+                value=private_jwk_cred.id,
+            ),
+        )
+        pulumi.info("Configured with IDP_AGENT_PRIVATE_KEY_JWK credential")
+
+    return params

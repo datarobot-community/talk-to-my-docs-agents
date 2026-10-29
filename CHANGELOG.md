@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [11.13.0] - 2026-10-29
+
+### Added
+
+- Documented optional MCP tool settings for the agent (`MCP_WORKLOAD_ID`, `MCP_DEPLOYMENT_ID`, `EXTERNAL_MCP_*`) in `.env.template`.
+
+### Changed
+
+- Updated `agent` component from 11.10.49 to 11.11.116:
+  - Added support for workload-api runtime
+  - Added support for tags in workloads
+  - Added support for use_case_id for agent in workloads
+  - Enabled use case / enclaves placement support
+  - Provisioned memory space for L2 agent card cache for workload on enclave at runtime
+  - Added support for custom mount_path for agent-to-agent communication
+  - Included run agent and start server in the component
+  - Migrated to the new execution environment, falling back to the legacy environment if the new one is not found
+  - Bumped datarobot-genai to 0.29.54
+- Updated `llm` component from 11.11.10 to 11.11.25:
+  - Aligned LLM config field names to the app-prefixed form (`LLM_USE_DATAROBOT_LLM_GATEWAY`, `LLM_NIM_DEPLOYMENT_ID`)
+  - Exported the app-prefixed NIM_DEPLOYMENT_ID alongside the bare one
+- Updated `base` component from 1d8a24d to 96fd823:
+  - Bumped Pulumi version and the default Pulumi DataRobot plugin version in taskfile
+- Raised the `pulumi-datarobot` floor to 0.13.0 (required for workload tags).
+- Raised the minimum DataRobot XP plugin version to 2.0.0.
+
+### Fixed
+
+- `task deploy` failed on codespaces whose storage volume is NFS-backed: `npm ci` deletes `node_modules` first and NFS servers can return `ENOTEMPTY: directory not empty` for directories that already look empty. The Pulumi `Build Frontend` step and `task frontend_web:install` now run `npm ci || npm install`: `npm ci` stays the primary, lockfile-exact, airgap-safe path, and `npm install` only runs as a fallback that updates the existing tree in place when `npm ci` cannot remove it.
+- Declared the supported Node.js range (`engines` in `frontend_web/package.json`, `.nvmrc` pinned to 22) so unsupported Node majors warn up front instead of only at dependency install time.
+
+### Security
+
+- Updated dependencies to address known CVEs.
+
 ## [11.12.1] - 2026-09-04
 
 ### Fixed

@@ -17,12 +17,8 @@ from typing import Any
 
 import yaml
 
-DOTENV_CLI_YAML = (
-    Path(__file__).resolve().parent.parent.parent
-    / ".datarobot"
-    / "cli"
-    / "agent_retrieval_agent.yaml"
-)
+_CLI_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / ".datarobot" / "cli"
+DOTENV_CLI_YAML = _CLI_CONFIG_DIR / "agent_retrieval_agent.yaml"
 
 
 def _load_dotenv_cli_config() -> dict[str, Any]:

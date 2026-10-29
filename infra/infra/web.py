@@ -257,8 +257,11 @@ web_app = pulumi_datarobot.CustomApplication(  # type: ignore[call-overload]
     source_version_id=web_app_source.version_id,
     use_case_ids=[use_case.id],
     allow_auto_stopping=True,
-    resources=web_app_source.resources,  # type: ignore
-    required_key_scope_level=cast(Any, web_app_source.required_key_scope_level),
+    resources=cast(
+        pulumi_datarobot.CustomApplicationResourcesArgs,
+        web_app_source.resources,
+    ),
+    required_key_scope_level=web_app_source.required_key_scope_level,
     opts=pulumi.ResourceOptions(depends_on=[web_app_source]),
 )
 

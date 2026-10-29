@@ -79,8 +79,10 @@ prediction_environment = datarobot.PredictionEnvironment.get(
     id=proxy_llm_deployment.prediction_environment_id,
 )
 app_runtime_parameters = [
+    # datarobot-genai resolves LLM settings through the app-prefixed name
+    # (e.g. Config.llm_nim_deployment_id -> LLM_NIM_DEPLOYMENT_ID).
     datarobot.ApplicationSourceRuntimeParameterValueArgs(
-        key="NIM_DEPLOYMENT_ID",
+        key="LLM_NIM_DEPLOYMENT_ID",
         type="string",
         value=proxy_llm_deployment.id,
     ),
@@ -90,14 +92,14 @@ app_runtime_parameters = [
         value=default_model,
     ),
     datarobot.ApplicationSourceRuntimeParameterValueArgs(
-        key="USE_DATAROBOT_LLM_GATEWAY",
+        key="LLM_USE_DATAROBOT_LLM_GATEWAY",
         type="string",
         value="0",
     ),
 ]
 custom_model_runtime_parameters = [
     datarobot.CustomModelRuntimeParameterValueArgs(
-        key="NIM_DEPLOYMENT_ID",
+        key="LLM_NIM_DEPLOYMENT_ID",
         type="string",
         value=proxy_llm_deployment.id,
     ),
@@ -107,13 +109,13 @@ custom_model_runtime_parameters = [
         value=default_model,
     ),
     datarobot.CustomModelRuntimeParameterValueArgs(
-        key="USE_DATAROBOT_LLM_GATEWAY",
+        key="LLM_USE_DATAROBOT_LLM_GATEWAY",
         type="string",
         value="0",
     ),
 ]
 
 pulumi.export("Deployment ID " + llm_resource_name, proxy_llm_deployment.id)
-export("NIM_DEPLOYMENT_ID", proxy_llm_deployment.id)
+export("LLM_NIM_DEPLOYMENT_ID", proxy_llm_deployment.id)
 export("LLM_DEFAULT_MODEL", default_model)
-export("USE_DATAROBOT_LLM_GATEWAY", "0")
+export("LLM_USE_DATAROBOT_LLM_GATEWAY", "0")

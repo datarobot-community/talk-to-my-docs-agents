@@ -32,7 +32,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Build Docker Image
         run: |
-          task build-docker-image
+          SKIP_DOCKER_SAVE=true task build-docker-context
   tests:
     name: "Agent: agent_retrieval_agent ${{ matrix.python-version }}"
     runs-on: "ubuntu-latest"

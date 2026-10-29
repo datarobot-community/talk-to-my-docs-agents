@@ -13,9 +13,11 @@ Unlike the other frameworks, the base agent still uses a `MyAgent` class extendi
 
 ## Migration steps
 
+Complete the following steps to migrate the base agent.
+
 ### 1. Update imports
 
-**Before:**
+**Before**:
 
 ```python
 from openai.types.chat import CompletionCreateParams
@@ -23,7 +25,7 @@ from openai.types.chat import CompletionCreateParams
 from agent.config import Config
 ```
 
-**After:**
+**After**:
 
 ```python
 from datarobot_genai.langgraph.llm import get_llm
@@ -34,7 +36,7 @@ Remove the `Config` import. Add the `get_llm` import.
 
 ### 2. Simplify `MyAgent` class
 
-**Before:**
+**Before**:
 
 ```python
 class MyAgent(BaseAgent[None]):
@@ -65,7 +67,7 @@ class MyAgent(BaseAgent[None]):
         ...
 ```
 
-**After:**
+**After**:
 
 ```python
 class MyAgent(BaseAgent[None]):
@@ -77,7 +79,7 @@ The entire `__init__` method is removed. `BaseAgent` provides the constructor.
 
 ### 3. Update `custompy_adaptor`
 
-**Before:**
+**Before**:
 
 ```python
 async def custompy_adaptor(completion_create_params, ...):
@@ -90,7 +92,7 @@ async def custompy_adaptor(completion_create_params, ...):
     )
 ```
 
-**After:**
+**After**:
 
 ```python
 _PLACEHOLDER_MODELS = frozenset({"unknown"})
@@ -109,7 +111,7 @@ async def custompy_adaptor(completion_create_params, ...):
 ```
 
 Key differences:
-- `model=` parameter &rarr; `llm=get_llm(model_name=...)` parameter.
+- `model=` parameter → `llm=get_llm(model_name=...)` parameter.
 - `_PLACEHOLDER_MODELS` filters out the `"unknown"` model placeholder sent by DataRobot.
 
 ### 4. Update tests
@@ -121,4 +123,4 @@ Key differences:
 
 ## Complete before/after
 
-See the [full diff](https://github.com/datarobot-community/af-component-agent/pull/474) and the [base agent documentation](./frameworks/base.md) for the complete new layout.
+See the [full diff](https://github.com/datarobot-community/af-component-agent/pull/474) and the [base agent documentation](./base.md) for the complete new layout.

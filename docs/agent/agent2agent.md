@@ -1,8 +1,6 @@
 # Agent-to-Agent (A2A)
 
-Template agents can expose themselves as A2A servers and connect to remote agents via the agent-to-agent protocol. For authentication configuration, see [A2A Authentication](./agent2agent-auth.md).
-
-A2A runs on the [DRAgent front server](./README.md#front-server) (the only supported front server). If you have temporarily set `ENABLE_DRAGENT_SERVER=false`, A2A is unavailable until you re-enable DRAgent.
+Template agents can expose themselves as A2A servers and connect to remote agents via the agent-to-agent protocol. For authentication configuration, see [A2A authentication](./agent2agent-auth.md).
 
 To expose an agent via A2A:
 
@@ -12,22 +10,76 @@ To connect an agent to a remote agent via A2A:
 
 - Uncomment the `function_groups` and `workflow.tool_names` blocks in `workflow.yaml`.
 
-Enable the **ENABLE_RUNTIME_PARAMETERS_IMPROVEMENTS** feature flag in DataRobot to use environment variables in `workflow.yaml` files.
+Enable the `ENABLE_RUNTIME_PARAMETERS_IMPROVEMENTS` feature flag in DataRobot to use environment variables in `workflow.yaml` files.
 
 ### Agent cards and DataRobot deployments
 
-When the `ENABLE_GENAI_AGENT_TO_AGENT_SUPPORT` feature flag is enabled and you deploy an agent that exposes A2A server endpoints, the agent card is stored in DataRobot during deployment. Use the following endpoints:
+When the `ENABLE_GENAI_AGENT_TO_AGENT_SUPPORT` feature flag is enabled, deploying an agent that exposes A2A server endpoints stores the agent card in DataRobot. Use the following endpoints:
 
-- **List deployments with agent cards**&mdash;`GET deployments/?isA2AAgent=true`.
-- **Retrieve an agent card**&mdash;`GET deployments/DEPLOYMENT_ID/agentCard`.
+- List deployments with agent cards—`GET deployments/?isA2AAgent=true`.
+- Retrieve an agent card—`GET deployments/DEPLOYMENT_ID/agentCard`.
+
+## Unauthenticated agent card access
+
+Anonymous `GET /.well-known/agent-card.json` requests are opt-in. By default, unauthenticated requests receive `401 Unauthorized`.
+
+| Caller | Result |
+|--------|--------|
+| Authenticated (gateway identity headers present) | Full agent card |
+| Unauthenticated, `enable_unauthenticated_well_known_route: false` (default) | `401 Unauthorized` |
+| Unauthenticated, `enable_unauthenticated_well_known_route: true` | Redacted agent card (skills and identity extensions stripped) |
+
+Platform administrators must also enable unauthenticated routing per cluster before the well-known route is reachable for anonymous callers on deployed agents.
+
+On the **Workload API** runtime (`ENABLE_AGENT_ON_WORKLOAD_API=true`), setting this flag also adds optional-auth routes for `/a2a/.well-known/agent-card.json` (see [`mount_path`](#a2a-mount-path-mount_path)) and the root fallback `/.well-known/agent-card.json` to the workload artifact specification during deploy. See [Deployment runtimes](./deployment-runtimes.md#anonymous-agent-card-discovery).
+
+```yaml
+general:
+  front_end:
+    a2a:
+      enable_unauthenticated_well_known_route: true
+      server:
+        name: "My Agent"
+        description: "An example agent."
+```
+
+## A2A mount path: `mount_path`
+
+The A2A server is mounted at `/a2a/` by default. Set `general.front_end.a2a.mount_path` to serve it from a different suffix.
+
+```yaml
+general:
+  front_end:
+    a2a:
+      mount_path: "custom-a2a-mount-path"
+      server:
+        name: "My Agent"
+```
+
+| Rule | Detail |
+|------|--------|
+| Slashes | Leading and trailing slashes are stripped—`"/a2a/"` and `"a2a"` are equivalent. |
+| Segments | Multi-segment values such as `"api/a2a"` are allowed. Each segment must use letters, digits, `-`, `.`, `_`, or `~`, and must not start with a dot. |
+| Root | Mounting at the application root is not supported. An empty value is rejected. |
+
+The agent card URL, the card discovery path, the `<AGENT_APP_NAME>_A2A_ENDPOINT` runtime parameter, and the Pulumi A2A endpoint exports all follow this value. The card is also served at the root `/.well-known/agent-card.json` for clients that do not know the mount path.
+
+Read the exact URL after deploying:
+
+```bash
+pulumi stack output "Agent Deployment A2A Endpoint <asset>"   # Custom Models runtime
+pulumi stack output "Agent Workload A2A Endpoint <asset>"     # Workload API runtime
+```
+
+> **Warning:** Callers configured with an explicit `url` are not updated automatically. Update any client pointing at `.../directAccess/a2a/` when the agent it calls changes its mount path.
 
 ## Agent card resolution
 
-Before the first RPC call, the client fetches the remote agent's **agent card** — a JSON document describing the agent's capabilities and authentication requirements. There are two mutually exclusive ways to obtain it.
+Before the first RPC call, the client fetches the remote agent card — a JSON document describing the agent capabilities and authentication requirements. There are two mutually exclusive ways to obtain it.
 
 ### Direct fetch (`url`)
 
-Use this when the remote agent's card endpoint is directly reachable with the same credentials used for RPC calls — typically when calling a DataRobot-hosted agent with DataRobot API key auth. The client fetches the card from `{url}/.well-known/agent-card.json`, then uses the same `auth_provider` for all subsequent RPC calls. This is the setup used in the default template.
+Use this when the remote agent card endpoint is directly reachable with the same credentials used for RPC calls — typically when calling a DataRobot-hosted agent with DataRobot API key auth. The client fetches the card from `{url}/.well-known/agent-card.json`, then uses the same `auth_provider` for all subsequent RPC calls. This is the setup used in the default template.
 
 ```yaml
 function_groups:
@@ -37,15 +89,30 @@ function_groups:
     auth_provider: datarobot_auth
 ```
 
-This approach is the simplest, but it assumes the card is accessible before authentication is fully resolved. It is not suitable when the card endpoint requires a different auth flow than the RPC calls — for example, with Okta XAA, where the card itself describes how to authenticate (a chicken-and-egg problem). In that case, use the central registry instead.
+This approach is the simplest, but it assumes the card is accessible before authentication is fully resolved. It is not suitable when the card endpoint requires a different auth flow than the RPC calls — for example, with Okta XAA, where the card itself describes how to authenticate (a circular dependency). In that case, use the central registry instead.
+
+When testing locally and the URL points at the dev server (for example, `http://localhost:8842/a2a/`), unauthenticated requests to the card endpoint return `401` by default. Send gateway identity headers for the full card, or enable `enable_unauthenticated_well_known_route` for a redacted card. See [Debugging agents → Local agent card](./debugging.md#local-agent-card) and [Unauthenticated agent card access](#unauthenticated-agent-card-access).
 
 ### Central registry (`registry`)
 
-Use this when calling a DataRobot-hosted agent protected by Okta XAA or any other flow where the card endpoint requires auth that is not yet available before the card is read. The **central agent card registry** exposes all agent cards in the tenant at a single endpoint that requires only a standard `DATAROBOT_API_TOKEN`, bypassing the per-agent auth requirement for card discovery.
+Use this when calling a DataRobot-hosted agent protected by Okta XAA or any other flow where the card endpoint requires auth that is not yet available before the card is read. The central agent card registry exposes all agent cards in the tenant at a single endpoint that requires only a standard `DATAROBOT_API_TOKEN`, bypassing the per-agent auth requirement for card discovery.
 
-The RPC base URL is derived from the card's advertised `url` — you do not need to specify it separately. When a workflow has many registry-backed function groups, all cards are resolved in a maximum of two HTTP calls (one for deployment IDs, one for external IDs) and cached in-memory until the TTL expires.
+The RPC base URL is derived from the `url` advertised on the card; specifying it separately is not necessary. When a workflow has many registry-backed function groups, all cards are resolved in a maximum of two HTTP calls (one for deployment IDs, one for external IDs) and cached in-memory until the soft TTL expires.
 
-**Lookup by deployment ID** — use when you know the DataRobot deployment ID of the remote agent:
+Registry lookups use a cache. For an agent deployed to a workload on an enclave there is a second tier cache:
+
+| Tier | Backend | Scope |
+|------|---------|-------|
+| L1 | In-process memory | Single worker / replica |
+| L2 | DataRobot MemorySpace (created during agent startup) | Shared across replicas and pod restarts |
+
+The L2 cache uses the MemorySpace Session API, which is covered by `ENABLE_GENAI_EXPERIMENTATION` (already enabled for agent deployments). It does not require `ENABLE_AGENTIC_MEMORY_API` — that flag is only for mem0-compatible [agent memory](./agent-memory.md).
+
+When you connect to remote agents via A2A (`authenticated_a2a_client` in `function_groups`), `datarobot-genai` creates or adopts a MemorySpace for the registry L2 cache at startup for agents deployed to a workload on an enclave. The space is scoped to the deployment or workload via a `deduplication_key`, so replicas share one cache without Pulumi wiring. Agents that do not declare remote A2A clients never provision this space. Locally, only in-process L1 caching is used.
+
+When configured, resolved agent cards are written through to the MemorySpace-backed L2 cache so every replica shares the same registry snapshot. Entries within `AGENT_CARD_REGISTRY_SOFT_CACHE_TTL` are returned without contacting the registry; older entries are refreshed on demand and by a background refresh loop (half the soft TTL, minimum 60 seconds). If a registry refresh fails, a card may still be served from cache while it remains within `AGENT_CARD_REGISTRY_CACHE_TTL` (stale-if-error).
+
+Lookup by deployment ID — use when the DataRobot deployment ID of the remote agent is known:
 
 ```yaml
 function_groups:
@@ -56,7 +123,7 @@ function_groups:
     auth_provider: okta_auth
 ```
 
-**Lookup by external ID** — use when the remote agent publishes a stable catalogue identifier via `general.front_end.a2a.external.id` in its `workflow.yaml`. This decouples your config from deployment IDs, which can change across environments:
+Lookup by external ID — use when the remote agent publishes a stable catalog identifier via `general.front_end.a2a.external.id` in its `workflow.yaml`. This decouples the configuration from deployment IDs, which can change across environments:
 
 ```yaml
 function_groups:
@@ -67,22 +134,29 @@ function_groups:
     auth_provider: okta_auth
 ```
 
-> [!WARNING]
-> `external.id` is not validated or enforced for uniqueness by DataRobot — multiple agents can be registered under the same external ID. Use `AGENT_CARD_REGISTRY_ON_DUPLICATE` to control how the registry resolves such conflicts.
+> **Warning:** `external.id` is not validated or enforced for uniqueness by DataRobot — multiple agents can be registered under the same external ID. Use `AGENT_CARD_REGISTRY_ON_DUPLICATE` to control how the registry resolves such conflicts.
 
 #### Registry environment variables
+
+The registry lookup honors the following environment variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATAROBOT_API_TOKEN` | Yes | DataRobot API token for registry authentication. |
-| `DATAROBOT_ENDPOINT` | Yes | DataRobot API base URL, e.g. `https://app.datarobot.com/api/v2`. |
-| `AGENT_CARD_REGISTRY_CACHE_TTL` | No | Cache TTL in seconds. Default `86400` (24 h). Set to `0` to disable caching. |
+| `DATAROBOT_ENDPOINT` | Yes | DataRobot API base URL, for example, `https://app.datarobot.com/api/v2`. |
+| `AGENT_CARD_REGISTRY_CACHE_TTL` | No | Hard cache TTL in seconds — maximum age for stale-if-error when the registry is unreachable. Default `86400` (24 hours). Set to `0` to disable caching. |
+| `AGENT_CARD_REGISTRY_SOFT_CACHE_TTL` | No | Soft cache TTL in seconds — entries within this age skip registry fetches. Must not exceed the hard TTL. Defaults to the hard TTL when unset. When set in `.env` at deploy time, infra registers it as a runtime parameter so the deployed agent receives the value. |
 | `AGENT_CARD_REGISTRY_TIMEOUT` | No | HTTP timeout in seconds for registry requests. Default `30`. |
-| `AGENT_CARD_REGISTRY_ON_DUPLICATE` | No | Resolution strategy when multiple cards share the same external ID: `first` (default) keeps the earliest registered card, `last` keeps the most recently registered card, `error` raises an exception. `first` is recommended for stability — `last` and `error` may alter agent behaviour if a duplicate is introduced later. |
+| `AGENT_CARD_REGISTRY_ON_DUPLICATE` | No | Resolution strategy when multiple cards share the same external ID: `first` (default) keeps the earliest registered card, `last` keeps the most recently registered card, `error` raises an exception. `first` is recommended for stability — `last` and `error` may alter agent behavior if a duplicate is introduced later. |
+
 
 ## Configuration reference
 
+The following sections list the configuration fields for A2A function groups.
+
 ### `authenticated_a2a_client` function group
+
+The `authenticated_a2a_client` function group supports the following fields:
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -98,7 +172,7 @@ Exactly one field must be set.
 | Field | Description |
 |-------|-------------|
 | `deployment_id` | DataRobot deployment ID. |
-| `external_id` | External agent catalogue identifier. |
+| `external_id` | External agent catalog identifier. |
 
 ## Agent card identity: `external`
 
@@ -118,19 +192,18 @@ general:
         url: "https://my-agent-id.example.com/a2a/"
 ```
 
-> [!WARNING]
-> `external.id` and `external.url` are not validated by DataRobot. Incorrect values may result in a wrong entry-point URL or duplicate registrations — for example, if two agents are deployed with the same identifier. Use `AGENT_CARD_REGISTRY_ON_DUPLICATE` to control resolution behaviour. See [Registry environment variables](#registry-environment-variables) for details.
+> **Warning:** `external.id` and `external.url` are not validated by DataRobot. Incorrect values may result in a wrong entry-point URL or duplicate registrations — for example, if two agents are deployed with the same identifier. Use `AGENT_CARD_REGISTRY_ON_DUPLICATE` to control resolution behavior. See [Registry environment variables](#registry-environment-variables) for details.
 
 
 ## A2A agents hosted outside of DataRobot
 
 For A2A agents hosted outside of DataRobot:
 
-1. Create an external model with the "Agentic Workflow" target type and the default configuration.
+1. Create an external model with the **Agentic Workflow** target type and the default configuration.
 2. Deploy the external model.
 3. Push the agent card via `PUT deployments/DEPLOYMENT_ID/agentCard`.
 
-For external deployments, you can also remove the agent card with `DELETE deployments/DEPLOYMENT_ID/agentCard`.
+For external deployments, remove the agent card with `DELETE deployments/DEPLOYMENT_ID/agentCard`.
 
 ```python
 deployments = dr.Deployment.list(filters=DeploymentListFilters(is_a2a_agent=True))

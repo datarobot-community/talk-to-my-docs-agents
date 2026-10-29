@@ -62,7 +62,7 @@ def build_frontend() -> command.local.Command:
     build_command = " && ".join(
         [
             f"cd {frontend_dir}",
-            "npm ci",
+            "(npm ci || npm install)",
             "npm run build",
         ]
     )

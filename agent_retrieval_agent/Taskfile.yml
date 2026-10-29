@@ -61,10 +61,10 @@ tasks:
     cmds:
       - task: req
       - echo "Linting the codebase"
-      - '{{.UV_CMD}} run ruff check . --fix'
-      - '{{.UV_CMD}} run ruff format .'
-      - '{{.UV_CMD}} run mypy --pretty .'
-      - "{{.UV_CMD}} run yamlfix . -e '.venv/**/*.yaml' -e '.venv/**/*.yml' -e 'build/**/*.yaml' -e 'build/**/*.yml'"
+      - "{{.UV_CMD}} run ruff check . --fix"
+      - "{{.UV_CMD}} run ruff format ."
+      - "{{.UV_CMD}} run mypy --pretty ."
+      - "{{.UV_CMD}} run yamlfix *.yaml *.yml agent tests"
     silent: true
   lint-check:
     desc: 🧹 Check whether the codebase is linted
@@ -80,6 +80,20 @@ tasks:
     desc: 🧪 Run tests
     cmds: [echo "Running pytest on tests", '{{.UV_CMD}} run pytest -vv ./tests/']
     silent: true
+
+  eval:
+    desc: "📊 Run NAT batch evaluation (pass eval config path as CLI_ARGS)"
+    deps:
+      - auth-check
+    cmds:
+      - |
+        set -- {{.CLI_ARGS}}
+        if [ $# -eq 0 ]; then
+          echo "Usage: task agent_retrieval_agent:eval -- eval/eval-config-agent-goal-accuracy.yaml"; exit 1
+        fi
+        echo "Running nat eval with config $1"
+        {{.UV_CMD}} run nat eval --config_file "$1"
+    silent: true
   test-coverage:
     # Hidden to avoid showing in task list, run `task --list-all` to see it
     # desc: 🧪 Run tests with coverage
@@ -89,110 +103,42 @@ tasks:
     silent: true
   cli:
     desc: 🖥️ Run the CLI with provided arguments
-    vars:
-      START_DEV: '{{.START_DEV}}'
-    deps: [auth-check]
+    deps:
+      - auth-check
     cmds:
       - echo "Running CLI {{.CLI_ARGS}}"
       - |
         # DRAgent mode: forward cli.py commands to nat dragent and exit.
-        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-          export DRAGENT_CONFIG_FILE="${DRAGENT_CONFIG_FILE:-workflow.yaml}"
-          set -- {{.CLI_ARGS}}
-          if [ $# -eq 0 ]; then
-            echo "Usage: task agent_retrieval_agent:cli -- <execute|execute-deployment> [flags]"; exit 1
-          fi
-          CMD="$1"; shift
-          case "$CMD" in
-            execute-deployment) {{.UV_CMD}} run nat dragent query "$@" ;;
-            execute-custom-model) echo "execute-custom-model is not supported in dragent mode. Use execute-deployment instead."; exit 1 ;;
-            execute) {{.UV_CMD}} run nat dragent run "$@" ;;
-            *) echo "Unknown command '$CMD'. Supported: execute, execute-deployment"; exit 1 ;;
-          esac
-          exit $?
+        export DRAGENT_CONFIG_FILE="${DRAGENT_CONFIG_FILE:-workflow.yaml}"
+        set -- {{.CLI_ARGS}}
+        if [ $# -eq 0 ]; then
+          echo "Usage: task agent_retrieval_agent:cli -- <execute|execute-deployment> [flags]"; exit 1
         fi
-        if [ "{{.START_DEV}}" -eq "1" ]; then
-          # Kill any existing dev server processes
-          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
-
-          # Start dev server in background
-          echo "🚀 Starting dev server in background..."
-          {{.UV_CMD}} run python dev.py &
-          DEV_SERVER_PID=$!
-          echo "Dev server started with PID: $DEV_SERVER_PID"
-
-          # Wait for server to be ready
-          echo "⏳ Waiting for dev server to be ready..."
-          _AGENT_ENDPOINT="http://localhost:{{.AGENT_PORT}}"
-          i=0
-          while [ $i -lt 30 ]; do
-            if curl --silent --fail --max-time 2 "$_AGENT_ENDPOINT/" >/dev/null 2>&1; then
-              echo "✅ Dev server is ready!"
-              break
-            fi
-            sleep 1
-            i=$((i + 1))
-            if [ $i -eq 30 ]; then
-              echo "❌ Dev server failed to start within 30 seconds"
-              pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
-              exit 1
-            fi
-          done
-        fi
-      - |
-        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then exit 0; fi
-        # Run CLI and handle cleanup regardless of exit code
-        CLI_EXIT_CODE=0
-        UV_PROJECT={{.TASKFILE_DIR}} {{.UV_CMD}} run cli.py {{.CLI_ARGS}} || CLI_EXIT_CODE=$?
-        echo "CLI exited with code: $CLI_EXIT_CODE"
-
-        # Check if command failed and contains "execute"
-        if [ $CLI_EXIT_CODE -eq 1 ] && echo "{{.CLI_ARGS}}" | grep -q "execute "; then
-          echo ""
-          echo "❌ CLI command failed with exit status 1"
-          echo "💡 It looks like you're trying to execute an agent that requires a dev server."
-          echo "   Try one of these options:"
-          echo "   1. Start the dev server first: task agent_retrieval_agent:dev"
-          echo "   2. Or run with auto dev server: task agent_retrieval_agent:cli START_DEV=1 -- {{.CLI_ARGS}}"
-          echo ""
-        fi
-
-        # Clean up dev server processes if we started them
-        if [ "{{.START_DEV}}" -eq "1" ]; then
-          echo "🛑 Stopping dev server..."
-          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || true
-          echo "✅ Dev server stopped"
-        fi
-        exit $CLI_EXIT_CODE
+        CMD="$1"; shift
+        case "$CMD" in
+          execute-deployment) {{.UV_CMD}} run nat dragent query "$@" ;;
+          execute-custom-model) echo "execute-custom-model is not supported in dragent mode. Use execute-deployment instead."; exit 1 ;;
+          execute) {{.UV_CMD}} run nat dragent run "$@" ;;
+          *) echo "Unknown command '$CMD'. Supported: execute, execute-deployment"; exit 1 ;;
+        esac
+        exit $?
     silent: true
   dev:
     desc: 🔨 Run the development server
     deps: [auth-check]
     cmds:
       - |
-        ENTITY_ID=$(python3 -c "import json; print(json.load(open('../pulumi_config.json')).get('OTEL_ENTITY_ID',''))" 2>/dev/null || true)
-        if [ -n "${ENTITY_ID:-}" ] && [ -n "${DATAROBOT_API_TOKEN:-}" ]; then
-          export OTEL_EXPORTER_OTLP_HEADERS="x-datarobot-entity-id=${ENTITY_ID},x-datarobot-api-key=${DATAROBOT_API_TOKEN}"
-        fi
         (cd .. && dr --skip-plugin-update-check xp --plain-output) &
         DR_XP_PID=$!
         trap "kill $DR_XP_PID 2>/dev/null || true" EXIT
-        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-          {{.UV_CMD}} run nat dragent serve --config_file workflow.yaml --reload true --port {{.AGENT_PORT}}
-        else
-          {{.UV_CMD}} run python dev.py --autoreload
-        fi
+        {{.UV_CMD}} run nat dragent serve --config_file workflow.yaml --reload true --port {{.AGENT_PORT}}
     silent: true
   dev-stop:
     desc: 🛑 Stop the development server
     cmds:
       - |
         echo "Stopping development server"
-        if [ "${ENABLE_DRAGENT_SERVER:-false}" = "true" ]; then
-          pkill -f 'nat dragent serve' 2>/dev/null || echo "No development server process found"
-        else
-          pkill -f '{{.UV_CMD}} run python dev.py' 2>/dev/null || echo "No development server process found"
-        fi
+        pkill -f 'nat dragent serve' 2>/dev/null || echo "No development server process found"
   create-docker-context:
     desc: 🐳 Create the template for a local docker_context image
     vars:
@@ -219,8 +165,8 @@ tasks:
         echo "Extracting docker_context files..."
         TOP_FOLDER=$(unzip -qql datarobot-user-models.zip | head -n1 | awk '{print $4}' | cut -d/ -f1)
         echo "Downloaded docker context branch name: $TOP_FOLDER"
-        unzip -q datarobot-user-models.zip "$TOP_FOLDER/public_dropin_environments/python311_genai_agents/*"
-        cp -r "$TOP_FOLDER/public_dropin_environments/python311_genai_agents" ./docker_context
+        unzip -q datarobot-user-models.zip "$TOP_FOLDER/public_dropin_environments/python3_genai_agents/*"
+        cp -r "$TOP_FOLDER/public_dropin_environments/python3_genai_agents" ./docker_context
         rm -rf "$TOP_FOLDER" datarobot-user-models.zip
         rm ./docker_context/env_info.json
         mv ./docker_context/Dockerfile ./docker_context/Dockerfile.prod
@@ -236,22 +182,28 @@ tasks:
       - rm docker_context.tar.gz
       - echo "Removed docker_context from agent."
   build-docker-image:
-    desc: 🐳 [agent_retrieval_agent] Build the Docker image
-    deps: [create-docker-context]
+    # desc: 🐳 Build the Docker image
+    deps:
+      - install
     cmds:
       - echo "Building Docker image"
       - cp pyproject.toml docker_context/pyproject.toml
       - cp uv.lock docker_context/uv.lock
-      - cd docker_context && uv sync && docker build --platform linux/amd64 -f Dockerfile -t agent_retrieval_agent:latest
-        .
+      - cd docker_context && docker build --platform linux/amd64 -f Dockerfile -t agent_retrieval_agent:latest .
   build-docker-context:
     desc: 🐳 [agent_retrieval_agent] Build the Docker image
-    deps: [build-docker-image]
     cmds:
       - task: create-docker-context
       - task: build-docker-image
-      - echo "Saving Docker image"
-      - docker save agent_retrieval_agent:latest | gzip -1 > docker_context.tar.gz
+      - |
+        # SKIP_DOCKER_SAVE=true (used by the docker-build CI workflow) verifies the
+        # image builds without paying the cost of exporting it to a tarball.
+        if [ "${SKIP_DOCKER_SAVE:-false}" = "true" ]; then
+          echo "Skipping Docker image save (SKIP_DOCKER_SAVE=true)"
+        else
+          echo "Saving Docker image"
+          docker save agent_retrieval_agent:latest | gzip -1 > docker_context.tar.gz
+        fi
     silent: true
   train:
     desc: 🚂 [agent_retrieval_agent] Train the model

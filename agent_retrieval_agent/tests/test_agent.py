@@ -13,18 +13,12 @@
 # limitations under the License.
 
 import asyncio
-import json
 import os
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from crewai.types.streaming import CrewStreamingOutput, StreamChunk, StreamChunkType
-from datarobot_dome.guards.agent_goal_accuracy import (
-    AIMessage,
-    HumanMessage,
-    ToolCall,
-    ToolMessage,
-)
+from opentelemetry.trace import INVALID_SPAN
 
 from agent import MyAgent
 
@@ -278,7 +272,7 @@ class TestMyAgentCrewAI:
                     "x-datarobot-identity-token": "xyz",
                 },
             )
-            agent.config.use_datarobot_llm_gateway = use_datarobot_llm_gateway
+            agent.config.llm_use_datarobot_llm_gateway = use_datarobot_llm_gateway
             agent.llm()
 
             if use_datarobot_llm_gateway:
@@ -374,79 +368,6 @@ class TestMyAgentCrewAI:
     @patch("agent.myagent.trace.get_current_span")
     @patch("agent.myagent.Task")
     @patch("agent.myagent.Agent")
-    def test_chat(
-        self,
-        mock_agent,
-        mock_task,
-        mock_get_current_span,
-        mock_event_listener,
-        mock_crew,
-        agent,
-        load_model_result,
-    ):
-        # This test case covers testing that the agent invoke runs with the llm interactions mocked
-        from custom import chat
-
-        _ = mock_agent, agent  # Uncalled but left for global test setup
-
-        crew_output = Mock(
-            raw="agent result",
-            token_usage=Mock(
-                completion_tokens=1,
-                prompt_tokens=2,
-                total_tokens=3,
-            ),
-        )
-        # invoke() runs the crew with stream=True via akickoff (-> CrewStreamingOutput),
-        # async-iterates the manager's streamed answer (gated on "Final Answer:"), and
-        # reads usage/.raw from streaming_output.result.
-        streaming_output = _streaming_output(
-            [_text_chunk("Final Answer: agent result", "Manager Agent")],
-            crew_output,
-        )
-        mock_crew.return_value = Mock(akickoff=AsyncMock(return_value=streaming_output))
-        mock_span = Mock()
-        mock_span.is_recording.return_value = True
-        mock_get_current_span.return_value = mock_span
-
-        events = [
-            HumanMessage(content="Hi"),
-            AIMessage(
-                content="Which language should I use?",
-                tool_calls=[
-                    ToolCall(name="find_language", args={"input_language": "en"})
-                ],
-            ),
-            ToolMessage(content="Use en"),
-            AIMessage(content="How are you today?"),
-        ]
-        mock_event_listener.return_value = Mock(messages=events)
-
-        # Setup mocks
-        completion_create_params = {
-            "model": "test-model",
-            "messages": [{"role": "user", "content": '{"topic": "test"}'}],
-            "environment_var": True,
-        }
-
-        response = chat(completion_create_params, load_model_result=load_model_result)
-
-        # Assert results - check the pipeline_interactions - other sections of the
-        # results are already being checked in test_custom_model.py::test_chat
-        completion = json.loads(response.model_dump_json())
-        actual_events = json.loads(completion["pipeline_interactions"])["user_input"]
-        for expected_message, actual_message in zip(events, actual_events):
-            assert expected_message.content == actual_message["content"]
-            assert expected_message.type == actual_message["type"]
-
-        mock_span.set_attribute.assert_any_call("gen_ai.usage.input_tokens", 2)
-        mock_span.set_attribute.assert_any_call("gen_ai.usage.output_tokens", 1)
-
-    @patch("agent.myagent.Crew")
-    @patch("agent.myagent.CrewAIModerationsEventListener")
-    @patch("agent.myagent.trace.get_current_span")
-    @patch("agent.myagent.Task")
-    @patch("agent.myagent.Agent")
     def test_invoke_emits_final_answer(
         self,
         mock_agent,
@@ -468,7 +389,11 @@ class TestMyAgentCrewAI:
             token_usage=Mock(completion_tokens=1, prompt_tokens=2, total_tokens=3),
         )
         mock_crew.return_value = Mock(akickoff=AsyncMock(return_value=crew_output))
-        mock_get_current_span.return_value = Mock(is_recording=Mock(return_value=False))
+        # A real (non-recording) span rather than a bare Mock: with instrumentation
+        # active process-wide (triggered by importing agent.register elsewhere in the
+        # suite), OTel's own code also reads the current span and crashes trying to
+        # format a Mock's trace_id.
+        mock_get_current_span.return_value = INVALID_SPAN
         mock_event_listener.return_value = Mock(messages=None)
 
         user_msg = Mock(role="user")

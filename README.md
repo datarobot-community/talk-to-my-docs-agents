@@ -54,16 +54,17 @@ with your documents across different providers such as Google Drive, Box, ShareP
 
 1. [Quick start](#quick-start)
 2. [Development workflow](#development-workflow)
-3. [Deployment](#deployment)
-4. [Air-gapped deployment](#air-gapped-deployment)
-5. [Architecture overview](#architecture-overview)
-6. [Change the LLM](#change-the-llm)
-7. [Web configuration](#web-configuration)
-8. [OAuth applications](#oauth-applications)
-9. [Subproject documentation](#subproject-documentation)
-10. [Advanced usage](#advanced-usage)
-11. [Using DR CLI](#using-dr-cli)
-12. [Additional resources](#additional-resources)
+3. [Testing](#testing)
+4. [Deployment](#deployment)
+5. [Air-gapped deployment](#air-gapped-deployment)
+6. [Architecture overview](#architecture-overview)
+7. [Change the LLM](#change-the-llm)
+8. [Web configuration](#web-configuration)
+9. [OAuth applications](#oauth-applications)
+10. [Subproject documentation](#subproject-documentation)
+11. [Advanced usage](#advanced-usage)
+12. [Using DR CLI](#using-dr-cli)
+13. [Additional resources](#additional-resources)
 
 ## 🚀 Quick start
 
@@ -386,6 +387,42 @@ Running the web backend with a deployed agent:
 ```sh
 task web:dev
 ```
+
+## Testing
+
+This repository has two separate test suites.
+
+### Component unit tests
+
+```bash
+task test  # Runs the test task for every subproject that has one
+```
+
+This covers `agent_retrieval_agent`, `core`, `frontend_web`, `infra`, and
+`web`. They can also be run individually:
+
+```bash
+task agent_retrieval_agent:test  # pytest
+task core:test                   # pytest
+task frontend_web:test           # Vitest
+task infra:test                  # pytest
+task web:test                    # pytest, including tests/integration
+```
+
+### End-to-end browser tests
+
+`tests/e2e/` holds the Cypress suite, which drives a *deployed* instance of the
+app through a browser.
+
+```bash
+cd tests/e2e
+npm install
+npm run cy:open  # Or cy:run for headless
+```
+
+It needs `DATAROBOT_HOST`, `APP_USERNAME`, `APP_PASSWORD`, and `APP_ID` in the
+environment. See [tests/e2e/README.md](tests/e2e/README.md) for the full
+configuration reference, the page-object layout, and how to add a spec.
 
 ## Deployment
 

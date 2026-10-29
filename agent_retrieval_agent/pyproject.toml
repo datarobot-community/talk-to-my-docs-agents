@@ -5,8 +5,8 @@ description = "Implementation of agent_retrieval_agent"
 readme = "README.md"
 requires-python = ">=3.11, <3.14"
 dependencies = [
-    "datarobot-genai[crewai, dragent, auth]==0.29.23",
-    "datarobot-moderations[all]>=11.2.47,<12.0.0",
+    "datarobot-genai[crewai, dragent, auth]>=0.29.54,<0.30.0",
+    "datarobot-moderations[all]>=11.3.6,<12.0.0",
     "datarobot-drum==1.17.17",
     "datarobot-mlops==11.1.28",
     "langchain-litellm>=0.2.3",
@@ -15,11 +15,11 @@ dependencies = [
 
     # Core dependencies
     "aiosqlite>=0.21.0,<0.22",
-    "datarobot[auth-authlib,core,fs]>=3.16.0",
+    "datarobot[auth-authlib,core,fs]>=3.19.0",
     "duckdb>=1.3.1,<1.4",
-    "fsspec>=2025.5,<2025.6",
+    "fsspec>=2026.6.0",  # CVE fix
     "pdf2image>=1.17.0",
-    "pillow>=12.2.0",  # CVE-2026-25990, CVE-2026-40192
+    "pillow>=13.0.0",  # CVE-2026-25990, CVE-2026-40192 (13.x floor per cve-sync)
     "pymupdf>=1.25.5",
     "python-docx>=1.1.2",
     "python-pptx>=1.0.2",
@@ -33,8 +33,20 @@ dependencies = [
     "langchain-core>=0.3.81,<2.0.0",  # CVE-2025-68664 (CRITICAL), CVE-2025-65106 (HIGH)
     "mcp>=1.23.0",  # CVE-2025-66416
     "lxml>=6.1.0",  # CVE-2026-41066
-    "anyio>=4.11.0,<4.12.0",  # Fix: ImportError: `set_current_async_library`
+    "anyio>=4.14.2",  # CVE fix; upstream af-component-agent unpinned <4.12
     "packaging>=25.0,<26.0",
+
+    # Keep this in sync with the ag-ui-protocol version in fastapi_server/pyproject.toml of the
+    # recipe-datarobot-agent-application.
+    "ag-ui-protocol==0.1.15",
+
+    # datarobot-moderations[all] pulls llama-index-llms-bedrock-converse without its async
+    # extra. From 0.15 the package made aioboto3 optional; litellm>=1.98 hard-requires
+    # boto3>=1.43, which cannot resolve with aiobotocore, so a bare lock drops aioboto3
+    # and async Bedrock Converse (moderations / customized LlamaIndex) breaks. Declaring
+    # the async extra forces aioboto3 back and keeps litellm on a boto3-1.40-compatible
+    # release that still satisfies the CVE floor (>=1.96.2).
+    "llama-index-llms-bedrock-converse[async]>=0.15.0",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +65,7 @@ dev = [
 ]
 # Additional dependencies required to run the agent in DataRobot Agentic playground
 agentic_playground = [
-    "fastapi[All]==0.118.2",
+    "fastapi[All]==0.135.0",
     "psutil>=5.9.8",  # datarobot[core] requires psutil>=7.2.1; keep a floor, not an exact pin
     "ipykernel<6.29.0",
     "jupyter-client>=8.6.3",
@@ -198,80 +210,150 @@ module = "datarobot.*"
 implicit_reexport = true
 follow_imports = "skip"
 
+
 [[tool.mypy.overrides]]
 # Symlink to ../core/src/core; type-checked in the core component where
 # datarobot typing is fully available.
 module = "agent.core.*"
 follow_imports = "skip"
 
+# -----------------------------------------------------------------------
+# af-component marker - declares what this component is, without anything
+# needing to import it or activate its environment. Two readers today:
+#
+#  - the core CLI, which discovers components by scanning for this table;
+#  - cve-sync, which pairs this template with its policy/copier.yaml entry
+#    on `type`, and refuses to render a template that declares none. It
+#    reads the type out of the raw text, before rendering, so the marker
+#    has to stay outside any jinja conditional.
+# -----------------------------------------------------------------------
+[tool.af-component]
+type = "agent"
 
 [tool.uv]
-required-version = ">=0.7.0"
-override-dependencies = [
-    # Compatibility
-    "fastapi>=0.118.2,<0.133.0",  # NAT 1.6.0 uses add_event_handler removed in starlette 1.0 (https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1882)
-    "starlette>=0.49.1,<1.0.0",  # constrained by fastapi<0.133.0 (https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1882)
-    "pyarrow==21.0.0",
-    # crewai and drum pin otel to 1.34.x but datarobot-moderations needs 0.65b0
-    # instrumentation which requires otel 1.44.x. Override the entire otel family
-    # to stay version-synchronized at 1.44.x / 0.65b0. The upper bound is pinned to
-    # <1.45.0 so api/exporters cannot float ahead of the sdk.
-    "opentelemetry-api>=1.44.0,<1.45.0",
-    "opentelemetry-sdk>=1.44.0,<1.45.0",
-    "opentelemetry-semantic-conventions>=0.65b0,<0.66b0",  # Match instrumentation requirements
-    "opentelemetry-exporter-otlp-proto-http>=1.44.0,<1.45.0",
-    "opentelemetry-exporter-otlp-proto-common>=1.44.0,<1.45.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<1.45.0",
-    # nvidia-nat-crewai==1.4.1 pins crewai<1.0.0 but datarobot-genai requires crewai>=1.1.0.
-    # Override until nvidia-nat-crewai ships a fix upstream (BUZZOK-29844).
-    # Upstream issue: https://github.com/NVIDIA/NeMo-Agent-Toolkit/issues/1802
-    "crewai[litellm]>=1.11.0,<2.0.0",
-
-    # NOTE: the template's "unlock latest langgraph" overrides (langgraph>=1.1.0,
-    # langgraph-prebuilt>=1.0.0) are intentionally omitted. This is a crewai/dragent
-    # agent, not the langgraph framework variant.
-
-    # Keep this in sync with the ag-ui-protocol version in fastapi_server/pyproject.toml of the
-    # recipe-datarobot-agent-application.
-    "ag-ui-protocol==0.1.15",
-
-    # CVE fixes
-    "langgraph-checkpoint>=3.0.0",
-    "litellm>=1.83.7,<2.0.0",
-    "nltk>=3.9.4",
-    "openai>=2.30.0",  # litellm >= 1.83.7 pins openai at 2.24, causing dependency rollback and re-introducing CVEs.
-    "pdfminer.six>=20251230",
-    "mako>=1.3.12",
-
-    # Excluded
-    "gevent; sys_platform == 'never'",  # not used; therefore removed
-    "onnxruntime; sys_platform == 'never'",  # not used; therefore removed
-    "fastembed; sys_platform == 'never'",  # not used; therefore removed
-    "langchain-milvus; sys_platform == 'never'",  # not used and having CVEs
-    "pymilvus; sys_platform == 'never'",  # not used and having CVEs
-    "diskcache; sys_platform == 'never'",  # not used and having CVEs
-    "annoy; sys_platform == 'never'",  # not used, issues with building it
-    "uv; sys_platform == 'never'",  # not a runtime dependency
-    "build; sys_platform == 'never'",  # Python build system pulled in by crewai; runtime unnecessary
-    "kubernetes; sys_platform == 'never'",  # K8s client pulled in by crewai-tools; not used
-    "stagehand; sys_platform == 'never'",  # Playwright web automation pulled in by crewai-tools; not used
-    "pytube; sys_platform == 'never'",  # YouTube downloader pulled in by crewai-tools; not used
-    "youtube-transcript-api; sys_platform == 'never'",  # YouTube transcripts pulled in by crewai-tools; not used
-    "lancedb; sys_platform == 'never'",  # optional vector DB pulled in by crewai; not used
-    "openpyxl; sys_platform == 'never'",  # Excel parser pulled in by crewai-tools; not used
+# exclude-dependencies requires uv >= 0.10.0. Treat the floor below as a label,
+# not a guarantee: an older uv rejects exclude-dependencies as an unknown key,
+# which fails parsing of this entire [tool.uv] table and takes required-version
+# down with it. uv then only warns, exits 0, and resolves with the exclusions
+# silently absent. Confirmed on 0.7.0, 0.8.0, 0.8.17 and 0.9.0; the hard failure
+# only starts somewhere in late 0.9.x. Because the guard cannot protect itself,
+# the image build asserts the uv version before syncing.
+required-version = ">=0.10.0"
+# Packages a generated agent is verified not to need at runtime. Dropping a
+# package is a judgement about this project, so it is deliberately NOT org-wide
+# CVE policy and lives outside the cve-sync markers, where cve-sync leaves it
+# alone. uv's exclude-dependencies is not published in wheel metadata, so these
+# do not arrive from datarobot-genai's own exclusions and must be restated here.
+exclude-dependencies = [
+    "gevent",                   # not used; therefore removed
+    "onnxruntime",              # not used; therefore removed
+    "fastembed",                # not used; therefore removed
+    "langchain-milvus",         # not used and having CVEs
+    "pymilvus",                 # not used and having CVEs
+    "diskcache",                # not used and having CVEs
+    "annoy",                    # not used, issues with building it
+    "uv",                       # not a runtime dependency
+    # crewai / crewai-tools bloat
+    "build",                    # Python build system pulled in by crewai; runtime unnecessary
+    "kubernetes",               # K8s client pulled in by crewai-tools; not used
+    "stagehand",                # Playwright web automation pulled in by crewai-tools; not used
+    "pytube",                   # YouTube downloader pulled in by crewai-tools; not used
+    "youtube-transcript-api",   # YouTube transcripts pulled in by crewai-tools; not used
+    "lancedb",                  # optional vector DB pulled in by crewai; not used
+    "openpyxl",                 # Excel parser pulled in by crewai-tools; not used
     # NOTE: python-docx is NOT excluded here (unlike the base template) — this docs
     # agent imports `docx` directly in agent/core/document_loader for .docx parsing.
-    "llama-index-cli; sys_platform == 'never'",  # CLI tool pulled in by llama-index; not needed at runtime
+    "crewai-cli",               # CLI tool pulled in by crewai 1.15+; not needed at runtime
+    # llama-index bloat
+    "llama-index-cli",          # CLI tool pulled in by llama-index; not needed at runtime
     # nemoguardrails — server / CLI stack pulled in via datarobot-moderations[all]; not used at runtime
-    "watchdog; sys_platform == 'never'",  # file watcher for guardrails hot-reload; not used
-    # prompt-toolkit and wcwidth are intentionally NOT excluded: IPython (via ipykernel / agentic_playground)
-    # has a hard import-time dependency on prompt-toolkit; excluding it causes ModuleNotFoundError at runtime.
-    "typer; sys_platform == 'never'",  # CLI framework for guardrails CLI; not used
-    "shellingham; sys_platform == 'never'",  # shell detection; sole dependent was typer
+    "watchdog",                 # file watcher for guardrails hot-reload; not used
+    # prompt-toolkit and wcwidth are intentionally NOT excluded: IPython (via ipykernel /
+    # agentic_playground) has a hard import-time dependency on prompt-toolkit; excluding it
+    # causes ModuleNotFoundError at runtime.
+    "typer",                    # CLI framework for guardrails CLI; not used
+    "shellingham",              # shell detection; sole dependent was typer
     # deepeval — CLI / reporting stack pulled in via datarobot-moderations[all]; not used at runtime
-    "pyfiglet; sys_platform == 'never'",  # ASCII banner renderer for deepeval CLI; not used
-    "wheel; sys_platform == 'never'",  # build-time packaging tool; not a runtime dependency
+    "pyfiglet",                 # ASCII banner renderer for deepeval CLI; not used
+    "wheel",                    # build-time packaging tool; not a runtime dependency
+    "pip",                      # nvidia-nat-core dep; vendors msgpack and setuptools
+    "datarobot-early-access",   # randomly overlaps the core `datarobot`
 ]
+# Managed by cve-sync from policy/. Do not hand-edit between the markers below:
+# `cve-sync sync` regenerates both keys wholesale from policy and drops anything
+# policy lacks. Contribute a needed entry to cve-sync policy/ instead. This note
+# sits ABOVE the begin marker on purpose, since everything inside is replaced.
+#
+# mcp is capped at <2 in override-dependencies: MCP Python SDK 2.x removed
+# streamablehttp_client, which mcpadapt still imports via
+# datarobot_genai.crewai.mcp (and the other framework adapters). Keep that cap
+# in cve-sync policy too so the next sync does not drop it.
+# cve-sync:begin
+# cve-sync:waived chromadb>1.5.9 NOT applied -- no-upstream-fix, expires 2026-12-09
+constraint-dependencies = [
+    "aiohttp>=3.14.4",
+    "anyio>=4.14.2",
+    "authlib>=1.7.1",
+    "banks>=2.5.1",
+    "bleach>=6.4.0",
+    "certifi>=2026.10.19",
+    "crewai-tools>=1.15.21",
+    "fsspec>=2026.6.0",
+    "h2>=4.4.1",
+    "hpack>=4.2.0",
+    "idna>=3.15",
+    "joserfc>=1.6.8",
+    "jupyter-server>=2.21.0",
+    "langchain>=1.3.9",
+    "langchain-classic>=1.0.7",
+    "langchain-core>=1.3.3",
+    "langchain-nvidia-ai-endpoints>=1.4.2",
+    "langchain-openai>=1.1.14",
+    "langchain-text-splitters>=1.1.2",
+    "langgraph-checkpoint>=4.1.1",
+    "langgraph-sdk>=0.4.4",
+    "langsmith>=0.8.18",
+    "mistune>=3.3.3",
+    "multidict>=6.9.1",
+    "nltk>=3.10.3",
+    "oauthlib>=4.0.0",
+    "openai>=2.30.0",
+    "pdfminer.six>=20251230",
+    "pillow>=13.0.0",
+    "pyarrow>=23.0.1",
+    "pyasn1>=0.6.4",
+    "pydantic-settings>=2.14.2",
+    "pygments>=2.20.0",
+    "PyJWT>=2.15.0",
+    "pypdf>=6.19.0",
+    "pytest>=9.0.3",
+    "python-multipart>=0.0.31",
+    "requests>=2.33.0",
+    "setuptools>=83.0.0",
+    "soupsieve>=2.9.0",
+    "starlette>=1.3.1",
+    "tinytag>=2.3.0",
+    "tornado>=6.5.9",
+    "urllib3>=2.8.0",
+    "virtualenv>=21.7.13",
+]
+override-dependencies = [
+    "aiofiles>=25.1,<26",
+    "click>=8.3.3",
+    "crewai>=1.15.21",
+    "cryptography>=50.0.0",
+    "json-repair>=0.60.1",
+    "litellm>=1.96.2,<2.0.0",
+    "mcp>=1.30.0,<2",
+    "opentelemetry-api>=1.43.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-common>=1.43.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.43.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.43.0,<2.0.0",
+    "opentelemetry-instrumentation>=0.64b0,<0.65",
+    "opentelemetry-sdk>=1.43.0,<2.0.0",
+    "python-dotenv>=1.2.2,<2.0.0",
+]
+# cve-sync:end
 package = true
 environments = [
   "sys_platform == 'darwin'",

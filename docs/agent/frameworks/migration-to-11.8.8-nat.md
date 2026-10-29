@@ -11,9 +11,11 @@ The NAT agent changes are minimal compared to other frameworks. The `MyAgent` cl
 
 ## Migration steps
 
+Complete the following steps to migrate the NAT agent.
+
 ### 1. Simplify `__init__`
 
-**Before:**
+**Before**:
 
 ```python
 class MyAgent(NatAgent):
@@ -37,7 +39,7 @@ class MyAgent(NatAgent):
         )
 ```
 
-**After:**
+**After**:
 
 ```python
 class MyAgent(NatAgent):
@@ -56,12 +58,11 @@ class MyAgent(NatAgent):
 
 The explicit parameter list is replaced with `*args` / `**kwargs`, and `workflow_path` is a keyword-only argument with a default pointing at `agent/workflow.yaml`.
 
-> [!NOTE]
-> Agent component **11.9.3** moved `workflow.yaml` from `agent/agent/workflow.yaml` to `agent/workflow.yaml`. If you are upgrading across both 11.8.8 and 11.9.3, also follow [`workflow.yaml` path migration](../migration-workflow-yaml-path.md).
+> **Note:** Agent component 11.9.3 moved `workflow.yaml` from `agent/agent/workflow.yaml` to `agent/workflow.yaml`. When upgrading across both 11.8.8 and 11.9.3, also follow [`workflow.yaml` path migration](../migration-workflow-yaml-path.md).
 
 ### 2. Update `custompy_adaptor`
 
-**Before:**
+**Before**:
 
 ```python
 async def custompy_adaptor(completion_create_params, ...):
@@ -74,7 +75,7 @@ async def custompy_adaptor(completion_create_params, ...):
     )
 ```
 
-**After:**
+**After**:
 
 ```python
 async def custompy_adaptor(completion_create_params, ...):

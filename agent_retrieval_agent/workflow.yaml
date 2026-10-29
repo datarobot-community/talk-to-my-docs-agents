@@ -38,8 +38,23 @@ general:
           description: Researches and writes a blog post on the given topic.
           tags: []
           examples:
-            - Write a blog post about the future of AI in healthcare
-            - Create an article about sustainable energy trends
+            - "Write a blog post about the future of AI in healthcare"
+            - "Create an article about sustainable energy trends"
+            # Optional: Okta cross-application access (XAA) authentication for this agent's A2A endpoints.
+            # Uncomment to advertise XAA requirements on the agent card. See docs/agent/agent2agent-auth.md.
+            # cross_application_access:
+            #   token_exchange:
+            #     trusted_issuer: "https://your-org.okta.com"
+            #     audience: "https://your-org.okta.com/oauth2/ausXXXXXXXXXXXXXXX"
+            #   token_request:
+            #     token_url: "https://your-org.okta.com/oauth2/ausXXXXXXXXXXXXXXX/v1/token"
+            #     audience: "https://example.com/agents/my-agent-id"
+            #     scopes:
+            #       - "dr.impersonation"
+            # Optional: external identity and URL overrides published on the agent card.
+            # external:
+            #   id: "my-agent-id"
+            #   url: "https://my-agent-id.example.com/a2a/"
 # To connect this agent to a remote A2A agent, uncomment the block below and add the
 # function group name to the workflow's tool_names list.
 # function_groups:
@@ -50,6 +65,20 @@ general:
 llms:
   datarobot_llm:
     _type: datarobot-llm-component
+    # To enable LLM provider fallback/failover, remove the datarobot_llm block above and uncomment the following:
+    # datarobot_llm:
+    #   _type: datarobot-llm-router
+    #   primary:
+    #     llm_use_datarobot_llm_gateway: true
+    #     llm_default_model: azure/gpt-5-mini-2025-08-07
+    #   fallbacks:
+    #     - llm_use_datarobot_llm_gateway: true
+    #       llm_default_model: anthropic/claude-opus-4-20250514
+    #   num_retries: 1
+
+memory:
+  mem0_memory:
+    _type: dr_mem0_memory
 workflow:
   _type: crewai_agent
   llm_name: datarobot_llm

@@ -161,7 +161,7 @@ class MyAgent(CrewAIAgent):
 
         api_base = self.litellm_api_base(self.config.llm_deployment_id)
         model = preferred_model or self.model or self.default_model
-        if auto_model_override and not self.config.use_datarobot_llm_gateway:
+        if auto_model_override and not self.config.llm_use_datarobot_llm_gateway:
             model = self.default_model
         if self.verbose:
             print(f"Using model: {model}")
@@ -173,7 +173,7 @@ class MyAgent(CrewAIAgent):
             "timeout": self.timeout,
         }
 
-        if not self.config.use_datarobot_llm_gateway and self.forwarded_headers:
+        if not self.config.llm_use_datarobot_llm_gateway and self.forwarded_headers:
             identity_header = prepare_identity_header(self.forwarded_headers)
             if identity_header:
                 config["extra_headers"] = identity_header  # type: ignore[assignment]
